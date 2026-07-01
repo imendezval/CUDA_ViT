@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from src.cuda_vit.ops.vector_add_ext import load_vector_add
+from cuda_vit.ops.vector_add_ext import load_vector_add
 
 
 @pytest.fixture(scope="session")
