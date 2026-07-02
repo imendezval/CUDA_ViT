@@ -9,7 +9,7 @@ def load_vector_add():
     return load(
         name="vector_add_ext",
         sources=[
-            str(ROOT / "csrc" / "bindings.cpp"),
+            str(ROOT / "csrc" / "vector_add_bindings.cpp"),
             str(ROOT / "csrc" / "vector_add_cuda.cu"),
         ],
         extra_cflags=["-O3"],
