@@ -1,5 +1,3 @@
-// vector_add.cu
-
 #include <cuda_runtime.h>
 #include <iostream>
 #include <vector>
@@ -104,15 +102,15 @@ int main() {
 
 
     // Copy result: GPU -> CPU
-        check_cuda(
-            cudaMemcpy(
-                h_c.data(),
-                d_c,
-                bytes,
-                cudaMemcpyDeviceToHost
-            ),
-            "Failed to copy d_c to h_c"
-        );
+    check_cuda(
+        cudaMemcpy(
+            h_c.data(),
+            d_c,
+            bytes,
+            cudaMemcpyDeviceToHost
+        ),
+        "Failed to copy d_c to h_c"
+    );
 
 
     // Verify on CPU

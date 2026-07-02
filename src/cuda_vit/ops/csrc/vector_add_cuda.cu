@@ -15,8 +15,7 @@ __global__ void vector_add_kernel(
     float* out,
     int64_t n
 ) {
-    const int64_t idx =
-        static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
 
     if (idx < n) {
         out[idx] = a[idx] + b[idx];
