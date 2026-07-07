@@ -8,7 +8,7 @@
 
 namespace {
 
-constexpr int kThreads = 1024; // 16 * 16 * 3 = 768 + zero padding
+constexpr int kThreads = 256; // one thread handles as many pixels as necessary
 
 __global__ void PatchEmbedding_kernel(
     const float* __restrict__ x,    // B, C, H, W
@@ -27,8 +27,11 @@ __global__ void PatchEmbedding_kernel(
     // Each block: 1 patch @ 1 w_dim_idx = 1 out instance
     const int64_t block = static_cast<int64_t>(blockIdx.x);
     
-    const int batch_idx = block / (emb_size * num_patches_h * num_patches_w);
-    const int idx_in_batch = block % (emb_size * num_patches_h * num_patches_w);
+    const int64_t outputs_per_batch =
+        static_cast<int64_t>(emb_size) * num_patches_h * num_patches_w;
+
+    const int64_t batch_idx = block / outputs_per_batch;
+    const int64_t idx_in_batch = block % outputs_per_batch;
 
     const int num_patch_el = patch_size * patch_size * C_img;
 
@@ -46,33 +49,36 @@ __global__ void PatchEmbedding_kernel(
     const int start_x = patch_x * patch_size;
     const int start_y = patch_y * patch_size;
     
-    // Each thread -> one pixel
+    // Each thread -> multiple pixels
     const int tid = static_cast<int>(threadIdx.x);
-
-    const int c = tid / (patch_size * patch_size);
-    const int rem = tid % (patch_size * patch_size);
-    
-    // patch pixel to image pixel 
-    const int local_x = rem % patch_size;
-    const int local_y = rem / patch_size;
-
-    const int image_x = start_x + local_x;
-    const int image_y = start_y + local_y;
-
-    // Thread -> pixel index
-    const int64_t x_idx = ((batch_idx * C_img + c) * H_img + image_y) * W_img + image_x;
 
     // Prep shared memory
     extern __shared__ float shared_sums[];
 
-    if (tid < num_patch_el) {
-        shared_sums[tid] = row_w[tid] * x[x_idx];
-    } else {
-        shared_sums[tid] = 0.0f; // Reduction runs over all threads - must init shared_sums for all tid
+    float local_sum = 0.0f;
+
+    for (int col = tid; col < num_patch_el; col += blockDim.x) {
+        const int c = col / (patch_size * patch_size);
+        const int rem = col % (patch_size * patch_size);
+        
+        // patch pixel to image pixel 
+        const int local_x = rem % patch_size;
+        const int local_y = rem / patch_size;
+
+        const int image_x = start_x + local_x;
+        const int image_y = start_y + local_y;
+
+        // Thread -> pixel index
+        const int64_t x_idx = ((batch_idx * C_img + c) * H_img + image_y) * W_img + image_x;
+        
+        // Main calculation
+        local_sum += row_w[col] * x[x_idx];
     }
+
+    shared_sums[tid] = local_sum;  // inits whole shared_sums even if zero padded
     __syncthreads();
 
-    // Reduction only valid if blockDim pow 2
+    // Reduction (thread count must be pow 2)
     for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
         if (tid < stride) {
             shared_sums[tid] += shared_sums[tid + stride];
@@ -80,7 +86,7 @@ __global__ void PatchEmbedding_kernel(
         __syncthreads();
     }
 
-    if (tid == 0) {
+    if (tid == 0) { // only one thread has to write to output
         out_el[0] = shared_sums[0];
     }
 }
@@ -172,8 +178,6 @@ torch::Tensor PatchEmbedding_cuda(
     const int blocks = emb_size * B_img * num_patches;
     const size_t shared_bytes = kThreads * sizeof(float);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(x.get_device());
-
-    TORCH_CHECK(num_patch_el <= kThreads, "too many patch elements for number of threads per block");
 
     // Launch custom CUDA kernel
     PatchEmbedding_kernel<<<blocks, kThreads, shared_bytes, stream>>>(
