@@ -9,7 +9,7 @@ ext = load_layernorm()
 
 torch.manual_seed(0)
 
-# ViT-like shape: [batch, tokens, embedding_dim]
+# B, C, T
 B = 8
 T = 197
 D = 384
@@ -19,10 +19,10 @@ x = torch.randn(B, T, D, device="cuda", dtype=torch.float32)
 gamma = torch.randn(D, device="cuda", dtype=torch.float32)
 beta = torch.randn(D, device="cuda", dtype=torch.float32)
 
-# Your CUDA extension.
+# CUDA extension
 custom_out = ext.layernorm(x, gamma, beta, eps)
 
-# PyTorch reference: normalize only the final dimension D.
+# PyTorch reference: normalize only the final dim D
 torch_out = F.layer_norm(
     x,
     normalized_shape=(D,),
