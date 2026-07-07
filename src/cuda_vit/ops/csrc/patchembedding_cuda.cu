@@ -22,7 +22,8 @@ __global__ void PatchEmbedding_kernel(
     int H_img,
     int W_img
 ) {
-    // TODO: Grid blockIdx: (embed_dim, num_patches, batch_size)
+    // TODO: Experiment with gridded block format: (embed_dim, num_patches, batch_size)
+    // TODO: Let each block handle 1 patch + multiple embedding dims - w/ each warp 1 embedding dim
 
     // Each block: 1 patch @ 1 w_dim_idx = 1 out instance
     const int64_t block = static_cast<int64_t>(blockIdx.x);
