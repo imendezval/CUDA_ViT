@@ -9,8 +9,8 @@ def load_layernorm():
     return load(
         name="layernorm_ext",
         sources=[
-            str(ROOT / "csrc" / "layernorm_bindings.cpp"),
-            str(ROOT / "csrc" / "layernorm_cuda.cu"),
+            str(ROOT / "csrc" / "bindings" / "layernorm_bindings.cpp"),
+            str(ROOT / "csrc" / "kernels"  / "layernorm_cuda.cu"),
         ],
         extra_cflags=["-O3"],
         extra_cuda_cflags=["-O3"],

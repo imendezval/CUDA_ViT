@@ -9,8 +9,8 @@ def load_softmax():
     return load(
         name="softmax_ext",
         sources=[
-            str(ROOT / "csrc" / "softmax_bindings.cpp"),
-            str(ROOT / "csrc" / "softmax_cuda.cu"),
+            str(ROOT / "csrc" / "bindings" / "softmax_bindings.cpp"),
+            str(ROOT / "csrc" / "kernels"  / "softmax_cuda.cu"),
         ],
         extra_cflags=["-O3"],
         extra_cuda_cflags=["-O3"],

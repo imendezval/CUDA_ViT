@@ -9,8 +9,8 @@ def load_patchembedding():
     return load(
         name="patchembedding_ext",
         sources=[
-            str(ROOT / "csrc" / "patchembedding_bindings.cpp"),
-            str(ROOT / "csrc" / "patchembedding_cuda.cu"),
+            str(ROOT / "csrc" / "bindings" / "patchembedding_bindings.cpp"),
+            str(ROOT / "csrc" / "kernels"  / "patchembedding_cuda.cu"),
         ],
         extra_cflags=["-O3"],
         extra_cuda_cflags=["-O3"],

@@ -8,7 +8,7 @@ torch::Tensor fused_MLPlinear_GELU_cuda(
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def(
-        "fused_MLPlinear_GELU_cuda",
+        "fused_MLPlinear_GELU",
         &fused_MLPlinear_GELU_cuda,
         "Fused MLPlinear + Bias + GELU (CUDA)"
     );

@@ -9,8 +9,8 @@ def load_fused_mlp_linear_gelu():
     return load(
         name="mlp_linear_gelu_ext",
         sources=[
-            str(ROOT / "csrc" / "mlp_linear_gelu_bindings.cpp"),
-            str(ROOT / "csrc" / "mlp_linear_gelu_cuda.cu"),
+            str(ROOT / "csrc" / "bindings" / "mlp_linear_gelu_bindings.cpp"),
+            str(ROOT / "csrc" / "kernels"  / "mlp_linear_gelu_cuda.cu"),
         ],
         extra_cflags=["-O3"],
         extra_cuda_cflags=["-O3"],
