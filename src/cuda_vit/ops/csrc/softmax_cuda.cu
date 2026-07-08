@@ -118,6 +118,7 @@ torch::Tensor SoftMax_cuda(
     auto out = torch::empty_like(x);
 
     // Launch config
+    // TODO: Study CUDA kernel launch config cleanliness and safety, using dim3/bounded int for grid/block dimensions
     const int64_t num_blocks = static_cast<int64_t>(B);
     const size_t shared_bytes = kThreads * sizeof(float);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(x.get_device());
