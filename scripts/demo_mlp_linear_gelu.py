@@ -43,7 +43,7 @@ b = torch.randn(
 )
 
 # CUDA extension
-custom_out = ext.fused_MLPlinear_GELU_cuda(x, W, b)
+custom_out = ext.fused_MLPlinear_GELU(x, W, b)
 
 # PyTorch equivalent
 linear_out = F.linear(
