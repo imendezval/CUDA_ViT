@@ -24,9 +24,9 @@ __global__ void scaled_QK_kernel(
     const int64_t block = static_cast<int64_t>(blockIdx.x);
     const int tid = static_cast<int>(threadIdx.x);
 
-    const int key_idx = block % num_tokens;
-    const int q_row_idx = block / num_tokens; // idx all Q rows flattened
-    const int bh_idx = block / (num_tokens * num_tokens);
+    const int64_t key_idx = block % num_tokens;
+    const int64_t q_row_idx = block / num_tokens; // idx all Q rows flattened
+    const int64_t bh_idx = block / (num_tokens * num_tokens);
 
     const float* row_Q = Q + q_row_idx * head_dim;
     const float* row_K = K + (key_idx * head_dim) + (bh_idx * num_tokens * head_dim);
