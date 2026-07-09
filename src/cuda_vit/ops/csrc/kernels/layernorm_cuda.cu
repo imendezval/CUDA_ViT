@@ -5,6 +5,9 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
+#include <limits>
+
 namespace {
 
 constexpr int kThreads = 256;
@@ -111,8 +114,15 @@ torch::Tensor LayerNorm_cuda(
     TORCH_CHECK(beta.is_contiguous(),
                 "beta must be contiguous");
 
-    const int64_t emb_size = x.size(-1);         // D
-    const int64_t rows = x.numel() / emb_size;   // B * T
+    const int64_t E64 = x.size(-1);         // D
+    const int64_t num_x = x.numel();
+
+    TORCH_CHECK(num_x  <= std::numeric_limits<int>::max(), "x too large");
+    TORCH_CHECK(E64  <= std::numeric_limits<int>::max(), "embedding size too large");
+
+    const int emb_size = static_cast<int>(E64);
+    const int rows = num_x / emb_size;  // B * T
+
 
     TORCH_CHECK(emb_size > 0,
                 "last dimension must be non-empty");
@@ -134,9 +144,11 @@ torch::Tensor LayerNorm_cuda(
     auto out = torch::empty_like(x);
 
     // Launch config
-    const int blocks = rows;
+    const int64_t blocks = rows;
     const size_t shared_bytes = kThreads * sizeof(float);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(x.get_device());
+
+    TORCH_CHECK(blocks <= std::numeric_limits<unsigned int>::max(), "Too many outputs for 1D CUDA grid");
 
     // Launch custom CUDA kernel
     LayerNorm_kernel<<<blocks, kThreads, shared_bytes, stream>>>(

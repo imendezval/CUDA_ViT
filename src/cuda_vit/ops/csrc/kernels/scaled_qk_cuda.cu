@@ -5,6 +5,9 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
+#include <limits>
+
 
 namespace {
 
@@ -101,11 +104,20 @@ torch::Tensor scaled_QK_cuda(
     TORCH_CHECK(Q.is_contiguous(), "Q must be contiguous");
     TORCH_CHECK(K.is_contiguous(), "K must be contiguous");
 
-    // PyTorch sizes come as int64 conventionally
-    const int B = static_cast<int>(Q.size(0));
-    const int H = static_cast<int>(Q.size(1));
-    const int num_tokens = static_cast<int>(Q.size(2));
-    const int head_dim = static_cast<int>(Q.size(3));
+    const int64_t B64 = Q.size(0);
+    const int64_t H64 = Q.size(1);
+    const int64_t T64 = Q.size(2);
+    const int64_t Dh64 = Q.size(3);
+
+    TORCH_CHECK(B64  <= std::numeric_limits<int>::max(), "B too large");
+    TORCH_CHECK(H64  <= std::numeric_limits<int>::max(), "H too large");
+    TORCH_CHECK(T64  <= std::numeric_limits<int>::max(), "num_tokens too large");
+    TORCH_CHECK(Dh64 <= std::numeric_limits<int>::max(), "head_dim too large");
+
+    const int B = static_cast<int>(B64);
+    const int H = static_cast<int>(H64);
+    const int num_tokens = static_cast<int>(T64);
+    const int head_dim = static_cast<int>(Dh64);
 
     TORCH_CHECK(B > 0, "B must be > 0");
     TORCH_CHECK(H > 0, "H must be > 0");
@@ -122,11 +134,11 @@ torch::Tensor scaled_QK_cuda(
     );
 
     // Launch config
-    const int64_t num_blocks = static_cast<int64_t>(B) * H * num_tokens * num_tokens;
+    const int64_t num_blocks = B64 * H * num_tokens * num_tokens;
     const size_t shared_bytes = kThreads * sizeof(float);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(Q.get_device());
 
-    // ideally in a library we would check here also if num_blocks is allowed by 1D grid
+    TORCH_CHECK(num_blocks <= std::numeric_limits<unsigned int>::max(), "Too many outputs for 1D CUDA grid");
 
     // Launch custom CUDA kernel
     scaled_QK_kernel<<<num_blocks, kThreads, shared_bytes, stream>>>(

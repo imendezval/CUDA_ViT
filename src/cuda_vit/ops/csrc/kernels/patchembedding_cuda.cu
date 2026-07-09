@@ -5,6 +5,9 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
+#include <limits>
+
 
 namespace {
 
@@ -115,17 +118,33 @@ torch::Tensor PatchEmbedding_cuda(
     TORCH_CHECK(W.dim() == 2,
                 "W must have shape [emb_size, C * patch_size * patch_size]");
 
-    // Flat pointer indexing assumes standard contiguous layout
-    TORCH_CHECK(x.is_contiguous(), "x must be contiguous NCHW");
+    
+                TORCH_CHECK(x.is_contiguous(), "x must be contiguous NCHW");
     TORCH_CHECK(W.is_contiguous(), "W must be contiguous");
 
-    const int B_img = x.size(0);
-    const int C_img = x.size(1);
-    const int H_img = x.size(2);
-    const int W_img = x.size(3);
+    const int B64 = x.size(0);
+    const int C64 = x.size(1);
+    const int H64 = x.size(2);
+    const int W64 = x.size(3);
 
-    const int emb_size = W.size(0);
-    const int num_patch_el = W.size(-1);
+    const int emb_size64 = W.size(0);
+    const int num_patch_el64 = W.size(-1);
+
+    TORCH_CHECK(B64  <= std::numeric_limits<int>::max(), "B too large");
+    TORCH_CHECK(C64  <= std::numeric_limits<int>::max(), "C too large");
+    TORCH_CHECK(H64  <= std::numeric_limits<int>::max(), "H too large");
+    TORCH_CHECK(W64  <= std::numeric_limits<int>::max(), "W too large");
+
+    TORCH_CHECK(emb_size64  <= std::numeric_limits<int>::max(), "emb_size too large");
+    TORCH_CHECK(num_patch_el64  <= std::numeric_limits<int>::max(), "num_patch_el too large");
+
+    const int B_img = static_cast<int>(B64);
+    const int C_img = static_cast<int>(C64);
+    const int H_img = static_cast<int>(H64);
+    const int W_img = static_cast<int>(W64);
+
+    const int emb_size = static_cast<int>(emb_size64);
+    const int num_patch_el = static_cast<int>(num_patch_el64);
 
     TORCH_CHECK(B_img > 0 && C_img > 0 && H_img > 0 && W_img > 0,
                 "x dimensions must all be positive");
@@ -138,8 +157,7 @@ torch::Tensor PatchEmbedding_cuda(
 
 
     const int patch_area = num_patch_el / C_img;
-    const int patch_size =
-        static_cast<int>(std::sqrt(static_cast<double>(patch_area)));
+    const int patch_size = static_cast<int>(std::sqrt(static_cast<double>(patch_area)));
 
     TORCH_CHECK(
         patch_size > 0 && patch_size * patch_size == patch_area,
@@ -176,12 +194,14 @@ torch::Tensor PatchEmbedding_cuda(
     );
 
     // Launch config
-    const int blocks = emb_size * B_img * num_patches;
+    const int64_t num_blocks = emb_size64 * B_img * num_patches;
     const size_t shared_bytes = kThreads * sizeof(float);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(x.get_device());
 
+    TORCH_CHECK(num_blocks <= std::numeric_limits<unsigned int>::max(), "Too many outputs for 1D CUDA grid");
+
     // Launch custom CUDA kernel
-    PatchEmbedding_kernel<<<blocks, kThreads, shared_bytes, stream>>>(
+    PatchEmbedding_kernel<<<num_blocks, kThreads, shared_bytes, stream>>>(
         x.data_ptr<float>(), // Get raw GPU pointers from tensors (d_a)
         W.data_ptr<float>(),
         out.data_ptr<float>(),

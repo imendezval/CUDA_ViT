@@ -5,6 +5,9 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
+#include <limits>
+
 #include <math_constants.h>
 
 
@@ -105,9 +108,14 @@ torch::Tensor SoftMax_cuda(
     // Pointer arithmetic assumes standard contiguous row-major storage
     TORCH_CHECK(x.is_contiguous(), "x must be contiguous");
 
-    // PyTorch sizes come as int64 conventionally
-    const int B = static_cast<int>(x.size(0));
-    const int num_features = static_cast<int>(x.size(1));
+    const int64_t B64 = x.size(0);
+    const int64_t N64 = x.size(1);
+
+    TORCH_CHECK(B64  <= std::numeric_limits<int>::max(), "B too large");
+    TORCH_CHECK(N64  <= std::numeric_limits<int>::max(), "num_features too large");
+
+    const int B = static_cast<int>(B64);
+    const int num_features = static_cast<int>(N64);
 
     TORCH_CHECK(num_features > 0, "num_features must be > 0");
 
@@ -119,11 +127,11 @@ torch::Tensor SoftMax_cuda(
 
     // Launch config
     // TODO: Study CUDA kernel launch config cleanliness and safety, using dim3/bounded int for grid/block dimensions
-    const int64_t num_blocks = static_cast<int64_t>(B);
+    const int64_t num_blocks = B64;
     const size_t shared_bytes = kThreads * sizeof(float);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(x.get_device());
 
-    // ideally in a library we would check here also if num_blocks is allowed by 1D grid
+    TORCH_CHECK(num_blocks <= std::numeric_limits<unsigned int>::max(), "Too many outputs for 1D CUDA grid");
 
     // Launch custom CUDA kernel
     SoftMax_kernel<<<num_blocks, kThreads, shared_bytes, stream>>>(

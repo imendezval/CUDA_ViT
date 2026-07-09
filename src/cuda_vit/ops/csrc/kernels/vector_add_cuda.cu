@@ -5,6 +5,9 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
+#include <limits>
+
 namespace {
 
 constexpr int kThreads = 256;

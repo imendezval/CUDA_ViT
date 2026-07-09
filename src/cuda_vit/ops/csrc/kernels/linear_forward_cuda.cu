@@ -5,6 +5,9 @@
 
 #include <cuda_runtime.h>
 
+#include <cstdint>
+#include <limits>
+
 
 namespace {
 
@@ -105,10 +108,17 @@ torch::Tensor linear_forward_cuda(
     TORCH_CHECK(x.is_contiguous(), "x must be contiguous");
     TORCH_CHECK(W.is_contiguous(), "W must be contiguous");
 
-    // PyTorch sizes come as int64 conventionally
-    const int B = static_cast<int>(x.size(0));
-    const int in_features = static_cast<int>(x.size(1));
-    const int out_features = static_cast<int>(W.size(0));
+    const int B64 = x.size(0);
+    const int I64 = x.size(1);
+    const int O64 = W.size(0);
+
+    TORCH_CHECK(B64  <= std::numeric_limits<int>::max(), "B too large");
+    TORCH_CHECK(I64  <= std::numeric_limits<int>::max(), "in_features too large");
+    TORCH_CHECK(O64  <= std::numeric_limits<int>::max(), "out_features too large");
+    
+    const int B = static_cast<int>(B64);
+    const int in_features = static_cast<int>(I64);
+    const int out_features = static_cast<int>(O64);
 
     // Makes the extension respect PyTorch's current GPU/device/stream
     c10::cuda::CUDAGuard device_guard(x.device());
@@ -124,11 +134,11 @@ torch::Tensor linear_forward_cuda(
     }
 
     // Launch config
-    const int64_t num_blocks = static_cast<int64_t>(B) * out_features;
+    const int64_t num_blocks = B64 * out_features;
     const size_t shared_bytes = kThreads * sizeof(float);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(x.get_device());
 
-    // ideally in a library we would check here also if num_blocks is allowed by 1D grid
+    TORCH_CHECK(num_blocks <= std::numeric_limits<unsigned int>::max(), "Too many outputs for 1D CUDA grid");
 
     // Launch custom CUDA kernel
     linear_forward_kernel<<<num_blocks, kThreads, shared_bytes, stream>>>(
