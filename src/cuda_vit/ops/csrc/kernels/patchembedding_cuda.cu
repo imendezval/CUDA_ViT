@@ -122,13 +122,13 @@ torch::Tensor PatchEmbedding_cuda(
                 TORCH_CHECK(x.is_contiguous(), "x must be contiguous NCHW");
     TORCH_CHECK(W.is_contiguous(), "W must be contiguous");
 
-    const int B64 = x.size(0);
-    const int C64 = x.size(1);
-    const int H64 = x.size(2);
-    const int W64 = x.size(3);
+    const int64_t B64 = x.size(0);
+    const int64_t C64 = x.size(1);
+    const int64_t H64 = x.size(2);
+    const int64_t W64 = x.size(3);
 
-    const int emb_size64 = W.size(0);
-    const int num_patch_el64 = W.size(-1);
+    const int64_t emb_size64 = W.size(0);
+    const int64_t num_patch_el64 = W.size(-1);
 
     TORCH_CHECK(B64  <= std::numeric_limits<int>::max(), "B too large");
     TORCH_CHECK(C64  <= std::numeric_limits<int>::max(), "C too large");
@@ -218,7 +218,7 @@ torch::Tensor PatchEmbedding_cuda(
     const cudaError_t error = cudaGetLastError();
     TORCH_CHECK(
         error == cudaSuccess,
-        "vector_add_kernel launch failed: ",
+        "PatchEmbedding_kernel launch failed: ",
         cudaGetErrorString(error)
     );
 
