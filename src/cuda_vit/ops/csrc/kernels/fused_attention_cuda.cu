@@ -74,13 +74,13 @@ __global__ void fused_attention_kernel(
     int rounds_QK = (num_tokens + groups_per_block - 1) / groups_per_block;
 
     for (int round = 0; round < rounds_QK; ++round) {
-        int out_el = round * groups_per_block + group_id;
-        bool active = out_el < num_tokens;
+        const int out_el = round * groups_per_block + group_id;
+        const bool active = out_el < num_tokens;
         // equivalent to:
         // for (int out_el = group_id; out_el < num_tokens; out_el += groups_per_block)
         // with all threads reaching all __syncthreads();
 
-        float local_sum = 0.0f;
+        const float local_sum = 0.0f;
         
         if (active) {
             for (int col = lane_id; col < head_dim; col += group_size) {
