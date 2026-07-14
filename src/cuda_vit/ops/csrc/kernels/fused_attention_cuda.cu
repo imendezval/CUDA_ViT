@@ -66,9 +66,6 @@ __global__ void fused_attention_kernel(
     const int group_id = tid / group_size; // each group handles multiple output element aka row * K columns sequentially
     const int lane_id = tid % group_size;  // each lane_id handles multiple element wise * sequentially
 
-    // per group reduction buffer
-    float* g_red_buffer = red_buffer + group_id * group_size;
-
     // ==================== Q @ K rows ====================
     // Q row @ all K rows of B, H pair
     const int rounds_QK = (num_tokens + groups_per_block - 1) / groups_per_block;
@@ -80,26 +77,25 @@ __global__ void fused_attention_kernel(
         // for (int out_el = group_id; out_el < num_tokens; out_el += groups_per_block)
         // with all threads reaching all __syncthreads();
 
-        float local_sum = 0.0f;
-        
         if (active) {
+            float local_sum = 0.0f;
+
             for (int col = lane_id; col < head_dim; col += group_size) {
                 local_sum += Q_row[col] * K_bh[static_cast<int64_t>(out_el) * head_dim + col];
             }
-        }
-        
-        g_red_buffer[lane_id] = local_sum;
-        __syncthreads();
-        
-        for (int stride = group_size / 2; stride > 0; stride >>= 1) {
-            if (lane_id < stride) {
-                g_red_buffer[lane_id] += g_red_buffer[lane_id + stride];
+
+            // Warp shuffle instead of reduction with shared memory
+            for (int offset = group_size / 2; offset > 0; offset >>= 1) {
+                local_sum += __shfl_down_sync(
+                    0xffffffff,
+                    local_sum,
+                    offset
+                );
             }
-            __syncthreads();
-        }
-        
-        if (active && lane_id == 0) {
-            scores[out_el] = g_red_buffer[0] / sqrtf(static_cast<float>(head_dim));
+            
+            if (lane_id == 0) {
+                scores[out_el] = local_sum / sqrtf(static_cast<float>(head_dim));
+            }
         }
     }
 
@@ -156,26 +152,26 @@ __global__ void fused_attention_kernel(
         int out_el = group_id + round * groups_per_block;
         bool active = out_el < head_dim;
 
-        float local_sum = 0.0f; 
-
+        
         if (active) {
+            float local_sum = 0.0f;
+
             for (int col = lane_id; col < num_tokens; col += group_size) {
                 local_sum += scores[col] * V_bh[out_el + col * head_dim];
             }
-        }
-
-        g_red_buffer[lane_id] = local_sum;
-        __syncthreads();
-
-        for (int stride = group_size / 2; stride > 0; stride >>= 1) {
-            if (lane_id < stride) {
-                g_red_buffer[lane_id] += g_red_buffer[lane_id + stride];
+            
+            // Warp shuffle instead of reduction with shared memory
+            for (int offset = group_size / 2; offset > 0; offset >>= 1) {
+                local_sum += __shfl_down_sync(
+                    0xffffffff,
+                    local_sum,
+                    offset
+                );
             }
-            __syncthreads();
-        }
-
-        if (active && lane_id == 0) {
-            out_row[out_el] = g_red_buffer[0];
+            
+            if (lane_id == 0) {
+                out_row[out_el] = local_sum;
+            }
         }
     }
 }
@@ -281,10 +277,12 @@ torch::Tensor FusedAttention_cuda(
         "Too many attention rows for 1D CUDA grid"
     );
 
-    const size_t shared_bytes =
+    const size_t shared_bytes = // warp shuffles but still need mem for softmax max + sum reductions
         (static_cast<size_t>(num_tokens) + kThreads) * sizeof(float);
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(Q.get_device());
+
+    static_assert(group_size == 32, "Each embedding group must be one warp");
 
     // Launch custom CUDA kernel
     fused_attention_kernel<<<num_blocks, kThreads, shared_bytes, stream>>>(

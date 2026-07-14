@@ -15,7 +15,7 @@ namespace {
 
 constexpr int kThreads = 256;
 constexpr int groups_per_block = 8;
-constexpr int group_size = kThreads / groups_per_block;
+constexpr int group_size = kThreads / groups_per_block; // 32 (= 1 warp)
 
 __global__ void PatchEmbeddingV2_kernel(
     const float* __restrict__ x,    // B, C, H, W
@@ -59,12 +59,7 @@ __global__ void PatchEmbeddingV2_kernel(
     const int lane_id = tid % group_size;
 
     // Prep shared memory
-    extern __shared__ float shared[];
-
-    float* patch_shared = shared;
-    float* reduction_buffer = shared + num_patch_el;
-
-    float* group_reduction = reduction_buffer + group_id * group_size;
+    extern __shared__ float patch_shared[];
 
     // Bring patch into shared memory to reuse retrieving only once
     for (int col = tid; col < num_patch_el; col += blockDim.x) {
@@ -87,7 +82,6 @@ __global__ void PatchEmbeddingV2_kernel(
     }
     __syncthreads();
 
-
     // For loop to let groups cover all embedding dimensions
     const int rounds = (emb_size + groups_per_block - 1)/ groups_per_block;
 
@@ -95,32 +89,29 @@ __global__ void PatchEmbeddingV2_kernel(
         const int out_el = round * groups_per_block + group_id;
         const bool active = out_el < emb_size;
         
-        float local_sum = 0.0f;
-
         if (active) {
+            float local_sum = 0.0f;
+
             // for loop to let lanes cover all patch pixels
             for (int col = lane_id; col < num_patch_el; col += group_size) {
                 // Main calculation
                 local_sum += W[static_cast<int64_t>(out_el) * num_patch_el + col] * patch_shared[col];
             }
-        }
 
-        group_reduction[lane_id] = local_sum;
-        __syncthreads();
-
-        // Per group reduction
-        for (int stride = group_size / 2; stride > 0; stride >>= 1) {
-            if (lane_id < stride) {
-                group_reduction[lane_id] += group_reduction[lane_id + stride];
+            // Warp shuffle instead of reduction with shared memory
+            for (int offset = group_size / 2; offset > 0; offset >>= 1) {
+                local_sum += __shfl_down_sync(
+                    0xffffffff,
+                    local_sum,
+                    offset
+                );
             }
-            __syncthreads();
-        }
-    
-        if (active && lane_id == 0) { // only one thread has to write to output
-            out_row[out_el] = group_reduction[0];
+
+            if (lane_id == 0) {
+                out_row[out_el] = local_sum;
+            }
         }
     }
-
 }
 
 } // namespace
@@ -223,8 +214,10 @@ torch::Tensor PatchEmbeddingV2_cuda(
 
     // Launch config
     const int64_t num_blocks = B64 * num_patches;
-    const size_t shared_bytes = (num_patch_el64 + kThreads) * sizeof(float);
+    const size_t shared_bytes = num_patch_el64  * sizeof(float);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(x.get_device());
+
+    static_assert(group_size == 32, "Each embedding group must be one warp");
 
     TORCH_CHECK(num_blocks <= std::numeric_limits<unsigned int>::max(), "Too many outputs for 1D CUDA grid");
 
