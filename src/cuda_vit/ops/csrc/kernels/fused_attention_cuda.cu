@@ -67,9 +67,7 @@ __global__ void fused_attention_kernel(
     int lane_id = tid % group_size;  // each lane_id handles multiple element wise * sequentially
 
     // per group reduction buffer
-    float* g_red_buffer = red_buffer 
-            + static_cast<int64_t>(group_id) * group_size;
-
+    float* g_red_buffer = red_buffer + group_id * group_size;
 
     // ==================== Q @ K rows ====================
     // Q row @ all K rows of B, H pair
