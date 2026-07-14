@@ -63,15 +63,15 @@ __global__ void fused_attention_kernel(
     float* red_buffer = scores + static_cast<int64_t>(num_tokens);
     
     // Prep groups and lanes
-    int group_id = tid / group_size; // each group handles multiple output element aka row * K columns sequentially
-    int lane_id = tid % group_size;  // each lane_id handles multiple element wise * sequentially
+    const int group_id = tid / group_size; // each group handles multiple output element aka row * K columns sequentially
+    const int lane_id = tid % group_size;  // each lane_id handles multiple element wise * sequentially
 
     // per group reduction buffer
     float* g_red_buffer = red_buffer + group_id * group_size;
 
     // ==================== Q @ K rows ====================
     // Q row @ all K rows of B, H pair
-    int rounds_QK = (num_tokens + groups_per_block - 1) / groups_per_block;
+    const int rounds_QK = (num_tokens + groups_per_block - 1) / groups_per_block;
 
     for (int round = 0; round < rounds_QK; ++round) {
         const int out_el = round * groups_per_block + group_id;
@@ -80,7 +80,7 @@ __global__ void fused_attention_kernel(
         // for (int out_el = group_id; out_el < num_tokens; out_el += groups_per_block)
         // with all threads reaching all __syncthreads();
 
-        const float local_sum = 0.0f;
+        float local_sum = 0.0f;
         
         if (active) {
             for (int col = lane_id; col < head_dim; col += group_size) {
