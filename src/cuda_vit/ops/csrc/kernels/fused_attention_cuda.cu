@@ -101,7 +101,6 @@ __global__ void fused_attention_kernel(
         if (active && lane_id == 0) {
             scores[out_el] = g_red_buffer[0] / sqrtf(static_cast<float>(head_dim));
         }
-        __syncthreads();
     }
 
     // ==================== Softmax ====================
@@ -178,8 +177,6 @@ __global__ void fused_attention_kernel(
         if (active && lane_id == 0) {
             out_row[out_el] = g_red_buffer[0];
         }
-
-        __syncthreads();
     }
 }
 

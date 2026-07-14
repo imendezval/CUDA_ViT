@@ -119,7 +119,6 @@ __global__ void PatchEmbeddingV2_kernel(
         if (active && lane_id == 0) { // only one thread has to write to output
             out_row[out_el] = group_reduction[0];
         }
-        __syncthreads();
     }
 
 }
