@@ -31,6 +31,8 @@ __global__ void PatchEmbeddingV2_kernel(
 ) {
     // Each block: 1 patch @ N emb_dims = N out instances
     // V2 big speedup, avoids different blocks loading up the same patch
+    // This version basiclly enables reusing patches in shared memory
+    // TODO: enable also embedding weights reuse by handling multiple patches per block also 
     const int64_t block = static_cast<int64_t>(blockIdx.x);
 
     const int64_t num_patches =
