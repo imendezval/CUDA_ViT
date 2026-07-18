@@ -10,19 +10,24 @@
 
 #include <math_constants.h>
 
+
 namespace {
 
 constexpr int kThreads = 256;
-constexpr int groups_per_block = 8;
-constexpr int group_size = kThreads / groups_per_block;
+constexpr int warps_per_block = 8;
+constexpr int warp_size = kThreads / warps_per_block; // 32, warp size
+
+constexpr int Br = 16;
+constexpr int Bc = 32;
+constexpr int KHeadDim = 64;
+constexpr int rounds = Br / warps_per_block;  // 2
 
 __global__ void FlashAttention_kernel(
     const float* __restrict__ Q,    // [B, H, T, Dh]    
     const float* __restrict__ K,    // [B, H, T, Dh]
     const float* __restrict__ V,    // [B, H, T, Dh]
     float* __restrict__ out,        // [B, H, T, Dh]
-    int num_tokens,
-    int head_dim
+    int num_tokens
 ) {
 
 // FlashAttention: theoretically the best advantage is not matrializing attention scores [T * T]
@@ -64,6 +69,219 @@ __global__ void FlashAttention_kernel(
 // with tensor cores operating on small matrix fragments in GEMM style (too difficult to implement for now)
 // (each warp doing : [Bp, P] @ [P, Be] → [Bp, Be])
 // instead of row at a time implementation on CUDA cores.
+
+const int64_t block = static_cast<int64_t>(blockIdx.x);
+
+const float scale = 1.0f / sqrtf(static_cast<float>(KHeadDim));
+
+// Pointer offsets
+const int tiles_per_Q =
+    (num_tokens + Br - 1) / Br;
+const int tiles_per_KV =
+    (num_tokens + Bc - 1) / Bc;
+const int64_t BH_idx = block / tiles_per_Q;
+const int Q_tile_idx = block % tiles_per_Q;
+
+const float* Q_tile_start = Q 
+    + BH_idx * num_tokens * KHeadDim 
+    + Q_tile_idx * Br * KHeadDim;
+const float* K_start = K + BH_idx * num_tokens * KHeadDim;
+const float* V_start = V + BH_idx * num_tokens * KHeadDim;
+float* out_start = out + BH_idx * num_tokens * KHeadDim;
+
+const int Q_tile_size = Br * KHeadDim;
+const int KV_tile_size = Bc * KHeadDim;
+
+// Prep Shared Memory
+extern __shared__ float shared[];
+float* Q_shared = shared;                   // [Br, Dh]
+float* K_shared = Q_shared + Q_tile_size;   // [Bc, Dh]
+float* V_shared = K_shared + KV_tile_size;  // [Bc, Dh]
+
+// persistent in registers:
+// m + l [Br] for online softmax
+// output accumulators [Br, Dh] fragments
+// Q tile fragments
+
+// PER WARP:
+// 1 Q row + Bc K rows -> Bc attention scores
+// Dh output accumulators
+
+// PER LANE:
+// n = Bc / warp_size
+// m = Dh / warp_size
+// TEMP: n K rows -> n attention scores
+// PERMANENT (per Q row): m output accumulators
+
+// all * Q row rounds
+
+const int tid = static_cast<int>(threadIdx.x);
+
+const int group_id = tid / warp_size;
+const int lane_id = tid % warp_size;
+
+// Running max + exp sum for online softmax
+float m[rounds];
+float l[rounds];
+
+// Output accumulator
+float out0[rounds];
+float out1[rounds];
+
+#pragma unroll
+for (int r = 0; r < rounds; ++r) {
+    m[r] = -CUDART_INF_F;
+    l[r] = 0.0f;
+    out0[r] = 0.0f;
+    out1[r] = 0.0f;
+}
+
+// ==================== Load Q tile ====================
+for (int col = tid; col < Q_tile_size; col += blockDim.x) {
+    Q_shared[col] = Q_tile_start[col];
+}
+__syncthreads();
+
+// Warps handle 1 Q row of tile + same K V tile at a time
+// Outer loop: iterate over K + V tiles: load, sync
+// Inner loop: warps iterate over Q rows: compute scores, update softmax, update accumulator, sync?
+for (int KV_tile_idx = 0; KV_tile_idx < tiles_per_KV; KV_tile_idx++) {
+    
+    // ==================== Load KV tiles ====================
+    for (int idx = tid; idx < KV_tile_size; idx += blockDim.x) {
+        // save K transposed for QK memory coalescing
+        int row = idx / KHeadDim;
+        int col = idx % KHeadDim;
+        // read global memory coalesced + index shared mem transposed
+        K_shared[col * Bc + row] = K_start[KV_tile_idx * KV_tile_size + idx];
+        
+        // save V normal for P @ V memory coalescing
+        V_shared[idx] = V_start[KV_tile_idx * KV_tile_size + idx];
+    }
+    __syncthreads();
+
+    #pragma unroll
+    for (int round = 0; round < rounds; round++) {
+    
+        const int Q_tile_row_idx = group_id + round * warps_per_block;
+        const int global_Q_row = Q_tile_idx * Br + Q_tile_row_idx;
+    
+        bool active = (Q_tile_row_idx < Br) && (global_Q_row < num_tokens);
+
+        if (active) {
+            // ==================== Q @ K rows ====================
+            //for (int col = lane_id; col < KV_tile_size; col += group_size)
+            
+            // we are computing Q_row of tile * Bc rows of K tile
+            // each K row needs its own accumulator
+            // to avoid using shared memory, 2 simple options:
+            // (eg for Bc = 64, warp size = 32)
+            
+            // option 1:
+            // each lane owns n = 2 (= Bc / warp size) K rows
+            // and has 2 accumulators + no reduction needed
+            // K stored transposed, so all lanes read adjacent memory
+            // because we iterate over Dh dim, with all lanes seeing all Dh idx simultaneously
+            
+            // option 2: split warp into subgroups, each subgroup one Q row
+            // more data reuse but more register pressure
+            
+            // we can never divide K rows across lanes
+            // 1 K row = 1 att score. 1 lane = 1 att score accumulator in register
+            // that would require shared memory reduction / many more registers
+            
+            float local_score = 0.0f;
+
+            for (int Dh_idx = 0; Dh_idx < KHeadDim; Dh_idx++) {
+                const int Q_el_idx = Q_tile_row_idx * KHeadDim + Dh_idx;
+                const int K_el_idx = Dh_idx * Bc + lane_id;
+
+                // Q val broadcasted across all warps
+                local_score += Q_shared[Q_el_idx] * K_shared[K_el_idx];
+                // each warp has now in registers [Bc] attention scores
+            }
+            local_score *= scale;
+            
+            // ======== Current tile max ========
+            // get local max score if Bc / Warp size > 1
+            // float tile_max = fmaxf(local_score0, local_score1)
+            float tile_max = local_score;
+
+            // Warp shuffle max reduction
+            for (int offset = warp_size / 2; offset > 0; offset >>= 1) {
+                tile_max = fmaxf(
+                    tile_max, 
+                    __shfl_down_sync(0xffffffffu, tile_max, offset)
+                );
+            }
+            // broadcast lane 0 to all lanes
+            tile_max = __shfl_sync(0xffffffffu, tile_max, 0);
+            
+            // ======== Merge previous max ========
+            const float m_new = fmaxf(m[round], tile_max);
+            const float alpha = expf(m[round] - m_new);
+            
+            // ======== Compute exp ========
+            const float p = expf(local_score - m_new);
+
+            // ======== Update denominator ========
+            float tile_sum = p;
+            for (int offset = warp_size / 2; offset > 0; offset >>= 1) {
+                tile_sum += __shfl_down_sync(
+                    0xffffffffu,
+                    tile_sum,
+                    offset
+                );
+            }
+            tile_sum = __shfl_sync(0xffffffffu, tile_sum, 0);
+
+            float l_new = alpha * l[round] + tile_sum;
+
+            // ======== Rescale prev out ========
+            out0[round] *= alpha;
+            out1[round] *= alpha;
+            
+            // ======== P @ V ========
+            // we can never divide Vs Dh dim across lanes
+            // 1 Dh dim = 1 output element
+            // Dh dims must live in same lane for output accumulator in lane register
+            for (int att_score_idx = 0; att_score_idx < 32; att_score_idx++) {
+                const float p_broadcast = 
+                    __shfl_sync(0xffffffff, p, att_score_idx);
+                out0[round] += p_broadcast * V_shared[att_score_idx * KHeadDim + lane_id];
+                out1[round] += p_broadcast * V_shared[att_score_idx * KHeadDim + lane_id + 32];
+            }
+            
+            // ======== Update state ========
+            m[round] = m_new;
+            l[round] = l_new;
+        }
+
+    }
+    __syncthreads(); // shared KV tile overwriting
+}
+
+#pragma unroll
+for (int round = 0; round < rounds; ++round) {
+    const int Q_tile_row_idx =
+        group_id + round * warps_per_block;
+
+    const int global_Q_row =
+        Q_tile_idx * Br + Q_tile_row_idx;
+
+    if (global_Q_row < num_tokens) {
+        const float inv_l = 1.0f / l[round];
+
+        float* output_row =
+            out_start + global_Q_row * KHeadDim;
+
+        output_row[lane_id] =
+            out0[round] * inv_l;
+
+        output_row[lane_id + 32] =
+            out1[round] * inv_l;
+    }
+}
 
 }
 
@@ -154,6 +372,19 @@ torch::Tensor FlashAttention_cuda(
     TORCH_CHECK(num_tokens > 0, "num_tokens must be > 0");
     TORCH_CHECK(head_dim > 0, "head_dim must be > 0");
 
+    TORCH_CHECK(
+        num_tokens % Br == 0,
+        "num_tokens must currently be divisible by Br, partial tile handling not yet implemented"
+    );
+    TORCH_CHECK(
+        num_tokens % Bc == 0,
+        "num_tokens must currently be divisible by Bc, partial tile handling not yet implemented"
+    );
+    TORCH_CHECK(
+        Dh64 == 64,
+        "This FlashAttention kernel currently requires head_dim == 64"
+    );
+
     // Makes the extension respect PyTorch's current GPU/device/stream
     c10::cuda::CUDAGuard device_guard(Q.device());
 
@@ -161,19 +392,22 @@ torch::Tensor FlashAttention_cuda(
     auto out = torch::empty_like(Q);
 
     const int64_t num_blocks =
-        static_cast<int64_t>(B) * H * num_tokens;
+        static_cast<int64_t>(B) * H * (num_tokens / Br);
 
     TORCH_CHECK(
         num_blocks <= std::numeric_limits<unsigned int>::max(),
         "Too many attention rows for 1D CUDA grid"
     );
 
-    const size_t shared_bytes = // warp shuffles but still need mem for softmax max + sum reductions
-        (static_cast<size_t>(num_tokens) + kThreads) * sizeof(float);
+    const size_t shared_bytes = (
+            Br * head_dim +
+            Bc * head_dim +
+            Bc * head_dim
+        ) * sizeof(float);
 
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(Q.get_device());
 
-    static_assert(group_size == 32, "Each embedding group must be one warp");
+    static_assert(warp_size == 32, "Each embedding group must be one warp");
 
     // Launch custom CUDA kernel
     FlashAttention_kernel<<<num_blocks, kThreads, shared_bytes, stream>>>(
@@ -181,8 +415,7 @@ torch::Tensor FlashAttention_cuda(
         K.data_ptr<float>(),
         V.data_ptr<float>(),
         out.data_ptr<float>(),
-        num_tokens,
-        head_dim
+        num_tokens
     );
 
     // Check for launch errors
