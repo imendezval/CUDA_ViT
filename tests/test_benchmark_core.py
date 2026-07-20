@@ -6,14 +6,18 @@ from benchmarks.core import (
     BenchmarkEnv,
     Correctness,
     Timing,
+    amdahl_speedup,
     check_close,
     effective_bandwidth_gbs,
+    effective_tflops,
     format_comparison,
     format_correctness,
     format_run_header,
     format_table,
     format_timing,
+    parallel_efficiency,
     speedup,
+    throughput_scale,
 )
 
 
@@ -42,6 +46,51 @@ def test_effective_bandwidth_uses_median_latency():
     timing = Timing("custom", (1.0,), warmup=1, iterations=1)
 
     assert effective_bandwidth_gbs(1_000_000_000, timing) == pytest.approx(1000.0)
+
+
+def test_effective_tflops_uses_median_latency():
+    timing = Timing("custom", (2.0,), warmup=1, iterations=1)
+
+    assert effective_tflops(4_000_000_000, timing) == pytest.approx(2.0)
+
+
+def test_parallel_efficiency_is_speedup_per_parallel_unit():
+    assert parallel_efficiency(speedup_value=6.0, parallel_units=8) == pytest.approx(0.75)
+
+
+def test_parallel_efficiency_rejects_invalid_parallel_units():
+    with pytest.raises(ValueError, match="parallel_units"):
+        parallel_efficiency(speedup_value=1.0, parallel_units=0)
+
+
+def test_throughput_scale_compares_work_per_ms():
+    baseline = Timing("B1", (1.0,), warmup=1, iterations=1)
+    candidate = Timing("B2", (1.5,), warmup=1, iterations=1)
+
+    assert throughput_scale(
+        baseline_work=1.0,
+        baseline=baseline,
+        candidate_work=2.0,
+        candidate=candidate,
+    ) == pytest.approx(4.0 / 3.0)
+
+
+def test_throughput_scale_rejects_invalid_work_values():
+    timing = Timing("custom", (1.0,), warmup=1, iterations=1)
+
+    with pytest.raises(ValueError, match="work"):
+        throughput_scale(0.0, timing, 1.0, timing)
+
+
+def test_amdahl_speedup_estimates_end_to_end_limit():
+    assert amdahl_speedup(runtime_fraction=0.4, optimized_speedup=2.0) == pytest.approx(1.25)
+
+
+def test_amdahl_speedup_rejects_invalid_inputs():
+    with pytest.raises(ValueError, match="runtime_fraction"):
+        amdahl_speedup(runtime_fraction=1.1, optimized_speedup=2.0)
+    with pytest.raises(ValueError, match="optimized_speedup"):
+        amdahl_speedup(runtime_fraction=0.5, optimized_speedup=0.0)
 
 
 def test_format_helpers_are_stable():

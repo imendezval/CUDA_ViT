@@ -111,6 +111,37 @@ def effective_bandwidth_gbs(bytes_per_call: int, timing: Timing) -> float:
     return bytes_per_call / (timing.median_ms * 1e-3) / 1e9
 
 
+def effective_tflops(flops_per_call: int, timing: Timing) -> float:
+    return flops_per_call / (timing.median_ms * 1e-3) / 1e12
+
+
+def parallel_efficiency(speedup_value: float, parallel_units: int) -> float:
+    if parallel_units <= 0:
+        raise ValueError("parallel_units must be > 0")
+    return speedup_value / parallel_units
+
+
+def throughput_scale(
+    baseline_work: float,
+    baseline: Timing,
+    candidate_work: float,
+    candidate: Timing,
+) -> float:
+    if baseline_work <= 0 or candidate_work <= 0:
+        raise ValueError("work values must be > 0")
+    baseline_throughput = baseline_work / baseline.median_ms
+    candidate_throughput = candidate_work / candidate.median_ms
+    return candidate_throughput / baseline_throughput
+
+
+def amdahl_speedup(runtime_fraction: float, optimized_speedup: float) -> float:
+    if not 0.0 <= runtime_fraction <= 1.0:
+        raise ValueError("runtime_fraction must be in [0, 1]")
+    if optimized_speedup <= 0.0:
+        raise ValueError("optimized_speedup must be > 0")
+    return 1.0 / ((1.0 - runtime_fraction) + runtime_fraction / optimized_speedup)
+
+
 def check_close(
     name: str,
     actual: torch.Tensor,
