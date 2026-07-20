@@ -10,6 +10,7 @@ from benchmarks.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,
+    effective_tflops,
     format_comparison,
     format_correctness,
     format_run_header,
@@ -59,10 +60,6 @@ def make_inputs(shape: LinearShape) -> tuple[torch.Tensor, torch.Tensor]:
     return x, weight
 
 
-def tflops(shape: LinearShape, median_ms: float) -> float:
-    return shape.flops / (median_ms * 1e-3) / 1e12
-
-
 def benchmark_shape(
     ext: object,
     shape: LinearShape,
@@ -102,7 +99,7 @@ def benchmark_shape(
     print(format_correctness(correctness))
     print(format_table(timings))
     for timing in timings:
-        throughput = tflops(shape, timing.median_ms)
+        throughput = effective_tflops(shape.flops, timing)
         print(f"{timing.name}: estimated_throughput={throughput:.2f} TFLOP/s")
     print(format_comparison(timings[0], timings[1]))
 

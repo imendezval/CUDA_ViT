@@ -19,6 +19,7 @@ from benchmarks.core import (
     effective_bandwidth_gbs,
     format_run_header,
     speedup,
+    throughput_scale,
     time_cuda,
 )
 from cuda_vit.ops.patchembedding_ext import load_patchembedding
@@ -57,18 +58,27 @@ ATOL = 2e-4
 
 def print_rows(
     sweep: str,
+    baseline_shape: PatchEmbeddingShape,
+    baseline_timings: dict[str, Timing],
     shape: PatchEmbeddingShape,
     timings: Iterable[Timing],
 ) -> None:
     rows = tuple(timings)
     baseline = rows[0]
     bytes_per_call = logical_bytes(shape)
+    baseline_bytes = logical_bytes(baseline_shape)
     for timing in rows:
         bandwidth = effective_bandwidth_gbs(bytes_per_call, timing)
+        scaling = throughput_scale(
+            baseline_bytes,
+            baseline_timings[timing.name],
+            bytes_per_call,
+            timing,
+        )
         print(
             f"{sweep},{shape.label},{timing.name},"
             f"{timing.median_ms:.6f},{speedup(baseline, timing):.4f},"
-            f"{bandwidth:.1f}"
+            f"{bandwidth:.1f},{scaling:.4f}"
         )
 
 
@@ -81,7 +91,7 @@ def benchmark_shape(
     warmup: int,
     iterations: int,
     repeats: int,
-) -> None:
+) -> tuple[Timing, ...]:
     x, weight = make_inputs(shape)
     expected = pytorch_patchembedding(x, weight, shape)
     check_close(
@@ -122,7 +132,7 @@ def benchmark_shape(
             repeats=repeats,
         ),
     )
-    print_rows(sweep, shape, timings)
+    return timings
 
 
 def parse_args() -> argparse.Namespace:
@@ -150,7 +160,10 @@ def main() -> None:
         repeats=args.repeats,
     )
     print(format_run_header("Patch Embedding Scaling Benchmark", BenchmarkEnv.current(), config))
-    print("sweep,shape,name,median_ms,speedup_vs_pytorch_conv2d,logical_bandwidth_gbs")
+    print(
+        "sweep,shape,name,median_ms,speedup_vs_pytorch_conv2d,"
+        "logical_bandwidth_gbs,throughput_scale"
+    )
 
     ext_v1 = load_patchembedding()
     ext_v2 = load_patchembeddingv2()
@@ -162,8 +175,10 @@ def main() -> None:
         ("embed", EMBED_SWEEP),
     )
     for sweep, shapes in sweeps:
+        baseline_shape = shapes[0]
+        baseline_timings = None
         for shape in shapes:
-            benchmark_shape(
+            timings = benchmark_shape(
                 ext_v1,
                 ext_v2,
                 sweep,
@@ -171,6 +186,15 @@ def main() -> None:
                 warmup=args.warmup,
                 iterations=args.iterations,
                 repeats=args.repeats,
+            )
+            if baseline_timings is None:
+                baseline_timings = {timing.name: timing for timing in timings}
+            print_rows(
+                sweep,
+                baseline_shape,
+                baseline_timings,
+                shape,
+                timings,
             )
 
 

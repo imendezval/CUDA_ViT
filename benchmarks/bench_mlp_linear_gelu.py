@@ -10,6 +10,7 @@ from benchmarks.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,
+    effective_tflops,
     format_comparison,
     format_correctness,
     format_run_header,
@@ -71,10 +72,6 @@ def pytorch_mlp_linear_gelu(
     return F.gelu(F.linear(x, weight, bias), approximate="tanh")
 
 
-def tflops(shape: MlpShape, median_ms: float) -> float:
-    return shape.linear_flops / (median_ms * 1e-3) / 1e12
-
-
 def benchmark_shape(
     ext: object,
     shape: MlpShape,
@@ -114,7 +111,7 @@ def benchmark_shape(
     print(format_correctness(correctness))
     print(format_table(timings))
     for timing in timings:
-        throughput = tflops(shape, timing.median_ms)
+        throughput = effective_tflops(shape.linear_flops, timing)
         print(f"{timing.name}: estimated_linear_throughput={throughput:.2f} TFLOP/s")
     print(format_comparison(timings[0], timings[1]))
 

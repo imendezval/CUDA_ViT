@@ -8,6 +8,7 @@ from benchmarks.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,
+    effective_tflops,
     format_comparison,
     format_correctness,
     format_run_header,
@@ -33,10 +34,6 @@ def make_inputs(shape: AttentionShape) -> tuple[torch.Tensor, torch.Tensor]:
 
 def pytorch_scaled_qk(q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
     return torch.matmul(q, k.transpose(-2, -1)) / (q.shape[-1] ** 0.5)
-
-
-def tflops(shape: AttentionShape, median_ms: float) -> float:
-    return shape.attention_matmul_flops / (median_ms * 1e-3) / 1e12
 
 
 def benchmark_shape(
@@ -78,7 +75,7 @@ def benchmark_shape(
     print(format_correctness(correctness))
     print(format_table(timings))
     for timing in timings:
-        throughput = tflops(shape, timing.median_ms)
+        throughput = effective_tflops(shape.attention_matmul_flops, timing)
         print(f"{timing.name}: estimated_throughput={throughput:.2f} TFLOP/s")
     print(format_comparison(timings[0], timings[1]))
 

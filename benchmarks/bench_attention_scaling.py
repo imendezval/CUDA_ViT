@@ -13,6 +13,7 @@ from benchmarks.core import (
     Timing,
     format_run_header,
     speedup,
+    throughput_scale,
     time_cuda,
 )
 from benchmarks.shapes import AttentionShape
@@ -67,13 +68,30 @@ def make_inputs(shape: AttentionShape) -> tuple[torch.Tensor, torch.Tensor, torc
     return q, k, v
 
 
-def print_rows(sweep: str, shape: AttentionShape, timings: Iterable[Timing]) -> None:
+def print_rows(
+    sweep: str,
+    baseline_shape: AttentionShape,
+    baseline_timings: dict[str, Timing],
+    shape: AttentionShape,
+    timings: Iterable[Timing],
+) -> None:
     rows = tuple(timings)
     baseline = rows[0]
     for timing in rows:
+        if timing.name in baseline_timings:
+            scaling = throughput_scale(
+                baseline_shape.attention_matmul_flops,
+                baseline_timings[timing.name],
+                shape.attention_matmul_flops,
+                timing,
+            )
+            scaling_text = f"{scaling:.4f}"
+        else:
+            scaling_text = "nan"
         print(
             f"{sweep},{shape.label},{timing.name},"
-            f"{timing.median_ms:.6f},{speedup(baseline, timing):.4f}"
+            f"{timing.median_ms:.6f},{speedup(baseline, timing):.4f},"
+            f"{scaling_text}"
         )
 
 
@@ -89,7 +107,7 @@ def benchmark_shape(
     warmup: int,
     iterations: int,
     repeats: int,
-) -> None:
+) -> tuple[Timing, ...]:
     q, k, v = make_inputs(shape)
     validate_outputs(
         fused_ext,
@@ -158,7 +176,7 @@ def benchmark_shape(
             )
         )
 
-    print_rows(sweep, shape, timings)
+    return tuple(timings)
 
 
 def parse_args() -> argparse.Namespace:
@@ -186,7 +204,7 @@ def main() -> None:
         repeats=args.repeats,
     )
     print(format_run_header("Attention Scaling Benchmark", BenchmarkEnv.current(), config))
-    print("sweep,shape,name,median_ms,speedup_vs_pytorch_sdpa")
+    print("sweep,shape,name,median_ms,speedup_vs_pytorch_sdpa,throughput_scale")
 
     fused_ext = load_fused_attention()
     flash_ext = load_flashattention()
@@ -201,8 +219,10 @@ def main() -> None:
         ("head_dim", HEAD_DIM_SWEEP),
     )
     for sweep, shapes in sweeps:
+        baseline_shape = shapes[0]
+        baseline_timings = None
         for shape in shapes:
-            benchmark_shape(
+            timings = benchmark_shape(
                 fused_ext,
                 flash_ext,
                 scaled_qk_ext,
@@ -213,6 +233,15 @@ def main() -> None:
                 warmup=args.warmup,
                 iterations=args.iterations,
                 repeats=args.repeats,
+            )
+            if baseline_timings is None:
+                baseline_timings = {timing.name: timing for timing in timings}
+            print_rows(
+                sweep,
+                baseline_shape,
+                baseline_timings,
+                shape,
+                timings,
             )
 
 
