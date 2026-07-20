@@ -1,9 +1,12 @@
 import pytest
 
 from benchmarks.core import (
+    BenchmarkConfig,
+    BenchmarkEnv,
     Timing,
     effective_bandwidth_gbs,
     format_comparison,
+    format_run_header,
     format_table,
     format_timing,
     speedup,
@@ -53,5 +56,28 @@ def test_format_helpers_are_stable():
             "name,median_ms,mean_ms,min_ms,max_ms",
             "pytorch,2.000000,2.000000,2.000000,2.000000",
             "custom,1.000000,1.000000,1.000000,1.000000",
+        ]
+    )
+
+
+def test_format_run_header_includes_environment_and_config():
+    env = BenchmarkEnv(
+        gpu="Test GPU",
+        pytorch="2.9.0",
+        cuda="12.8",
+    )
+    config = BenchmarkConfig(
+        warmup=10,
+        iterations=50,
+        repeats=3,
+    )
+
+    assert format_run_header("Attention Benchmark", env, config) == "\n".join(
+        [
+            "Attention Benchmark",
+            "GPU: Test GPU",
+            "PyTorch: 2.9.0",
+            "PyTorch CUDA: 12.8",
+            "warmup=10 iterations=50 repeats=3",
         ]
     )
