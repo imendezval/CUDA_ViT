@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
 import torch
 
@@ -15,32 +14,8 @@ from benchmarks.core import (
     format_table,
     time_cuda,
 )
+from benchmarks.shapes import ATTENTION_OP_SHAPES, AttentionShape
 from cuda_vit.ops.scaled_qk_ext import load_scaled_qk
-
-
-@dataclass(frozen=True)
-class AttentionShape:
-    batch: int
-    heads: int
-    tokens: int
-    head_dim: int
-
-    @property
-    def label(self) -> str:
-        return f"B{self.batch}_H{self.heads}_T{self.tokens}_Dh{self.head_dim}"
-
-    @property
-    def flops(self) -> int:
-        return 2 * self.batch * self.heads * self.tokens * self.tokens * self.head_dim
-
-
-SHAPES = (
-    AttentionShape(2, 2, 16, 32),
-    AttentionShape(4, 3, 32, 64),
-    AttentionShape(2, 3, 197, 64),
-    AttentionShape(2, 6, 197, 64),
-    AttentionShape(2, 4, 65, 48),
-)
 
 
 def make_inputs(shape: AttentionShape) -> tuple[torch.Tensor, torch.Tensor]:
@@ -61,7 +36,7 @@ def pytorch_scaled_qk(q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
 
 
 def tflops(shape: AttentionShape, median_ms: float) -> float:
-    return shape.flops / (median_ms * 1e-3) / 1e12
+    return shape.attention_matmul_flops / (median_ms * 1e-3) / 1e12
 
 
 def benchmark_shape(
@@ -136,7 +111,7 @@ def main() -> None:
 
     ext = load_scaled_qk()
 
-    for shape in SHAPES:
+    for shape in ATTENTION_OP_SHAPES:
         benchmark_shape(
             ext,
             shape,
@@ -148,4 +123,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

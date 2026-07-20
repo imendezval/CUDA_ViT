@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
@@ -17,38 +16,12 @@ from benchmarks.core import (
     format_table,
     time_cuda,
 )
+from benchmarks.shapes import ATTENTION_SHAPES, AttentionShape
 from cuda_vit.ops.attention_v_ext import load_attention_v
 from cuda_vit.ops.flashattention_ext import load_flashattention
 from cuda_vit.ops.fused_attention_ext import load_fused_attention
 from cuda_vit.ops.scaled_qk_ext import load_scaled_qk
 from cuda_vit.ops.softmax_ext import load_softmax
-
-
-@dataclass(frozen=True)
-class AttentionShape:
-    batch: int
-    heads: int
-    tokens: int
-    head_dim: int
-
-    @property
-    def label(self) -> str:
-        return (
-            f"B{self.batch}_H{self.heads}_T{self.tokens}_Dh{self.head_dim}"
-        )
-
-    @property
-    def supports_flashattention(self) -> bool:
-        return self.head_dim == 64 and self.tokens % 32 == 0
-
-
-SHAPES = (
-    AttentionShape(1, 1, 32, 64),
-    AttentionShape(2, 3, 64, 64),
-    AttentionShape(2, 3, 192, 64),
-    AttentionShape(2, 3, 197, 64),
-)
-
 
 def make_inputs(shape: AttentionShape) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     q = torch.randn(
@@ -266,7 +239,7 @@ def main() -> None:
     softmax_ext = load_softmax()
     attention_v_ext = load_attention_v()
 
-    for shape in SHAPES:
+    for shape in ATTENTION_SHAPES:
         benchmark_shape(
             fused_ext,
             flash_ext,
