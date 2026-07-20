@@ -6,7 +6,14 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 
-from benchmarks.core import format_comparison, format_table, time_cuda
+from benchmarks.core import (
+    BenchmarkConfig,
+    BenchmarkEnv,
+    format_comparison,
+    format_run_header,
+    format_table,
+    time_cuda,
+)
 from cuda_vit.ops.attention_v_ext import load_attention_v
 from cuda_vit.ops.flashattention_ext import load_flashattention
 from cuda_vit.ops.fused_attention_ext import load_fused_attention
@@ -231,9 +238,12 @@ def main() -> None:
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.set_float32_matmul_precision("highest")
 
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"PyTorch: {torch.__version__}")
-    print(f"PyTorch CUDA: {torch.version.cuda}")
+    config = BenchmarkConfig(
+        warmup=args.warmup,
+        iterations=args.iterations,
+        repeats=args.repeats,
+    )
+    print(format_run_header("Attention Benchmark", BenchmarkEnv.current(), config))
 
     fused_ext = load_fused_attention()
     flash_ext = load_flashattention()

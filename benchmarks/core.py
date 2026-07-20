@@ -31,6 +31,30 @@ class Timing:
         return max(self.samples_ms)
 
 
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    warmup: int
+    iterations: int
+    repeats: int
+
+
+@dataclass(frozen=True)
+class BenchmarkEnv:
+    gpu: str
+    pytorch: str
+    cuda: str
+
+    @classmethod
+    def current(cls) -> "BenchmarkEnv":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is required for benchmark metadata")
+        return cls(
+            gpu=torch.cuda.get_device_name(0),
+            pytorch=torch.__version__,
+            cuda=str(torch.version.cuda),
+        )
+
+
 def time_cuda(
     name: str,
     op: Callable[[], object],
@@ -86,6 +110,25 @@ def format_timing(timing: Timing) -> str:
     )
 
 
+def format_run_header(
+    title: str,
+    env: BenchmarkEnv,
+    config: BenchmarkConfig,
+) -> str:
+    return "\n".join(
+        [
+            title,
+            f"GPU: {env.gpu}",
+            f"PyTorch: {env.pytorch}",
+            f"PyTorch CUDA: {env.cuda}",
+            (
+                f"warmup={config.warmup} iterations={config.iterations} "
+                f"repeats={config.repeats}"
+            ),
+        ]
+    )
+
+
 def format_comparison(baseline: Timing, candidate: Timing) -> str:
     return (
         f"{candidate.name} vs {baseline.name}: "
@@ -104,4 +147,3 @@ def format_table(rows: Iterable[Timing]) -> str:
         for row in rows
     ]
     return "\n".join([header, *body])
-

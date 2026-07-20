@@ -7,8 +7,11 @@ import torch
 import torch.nn.functional as F
 
 from benchmarks.core import (
+    BenchmarkConfig,
+    BenchmarkEnv,
     effective_bandwidth_gbs,
     format_comparison,
+    format_run_header,
     format_table,
     time_cuda,
 )
@@ -173,9 +176,12 @@ def main() -> None:
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.set_float32_matmul_precision("highest")
 
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"PyTorch: {torch.__version__}")
-    print(f"PyTorch CUDA: {torch.version.cuda}")
+    config = BenchmarkConfig(
+        warmup=args.warmup,
+        iterations=args.iterations,
+        repeats=args.repeats,
+    )
+    print(format_run_header("Patch Embedding Benchmark", BenchmarkEnv.current(), config))
 
     ext_v1 = load_patchembedding()
     ext_v2 = load_patchembeddingv2()
