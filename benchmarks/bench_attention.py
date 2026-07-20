@@ -9,7 +9,10 @@ import torch.nn.functional as F
 from benchmarks.core import (
     BenchmarkConfig,
     BenchmarkEnv,
+    Correctness,
+    check_close,
     format_comparison,
+    format_correctness,
     format_run_header,
     format_table,
     time_cuda,
@@ -97,35 +100,45 @@ def validate_outputs(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-) -> None:
+) -> tuple[Correctness, ...]:
     expected = pytorch_attention(q, k, v)
 
-    torch.testing.assert_close(
-        custom_attention(scaled_qk_ext, softmax_ext, attention_v_ext, q, k, v),
-        expected,
-        rtol=1e-4,
-        atol=1e-4,
-    )
-    torch.testing.assert_close(
-        fused_ext.fused_attention(q, k, v),
-        expected,
-        rtol=1e-4,
-        atol=1e-4,
-    )
-    torch.testing.assert_close(
-        F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False),
-        expected,
-        rtol=1e-4,
-        atol=1e-4,
-    )
-
-    if shape.supports_flashattention:
-        torch.testing.assert_close(
-            flash_ext.FlashAttention(q, k, v),
+    results = [
+        check_close(
+            "custom_3_kernel",
+            custom_attention(scaled_qk_ext, softmax_ext, attention_v_ext, q, k, v),
             expected,
             rtol=1e-4,
             atol=1e-4,
+        ),
+        check_close(
+            "fused_attention",
+            fused_ext.fused_attention(q, k, v),
+            expected,
+            rtol=1e-4,
+            atol=1e-4,
+        ),
+        check_close(
+            "pytorch_sdpa",
+            F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False),
+            expected,
+            rtol=1e-4,
+            atol=1e-4,
+        ),
+    ]
+
+    if shape.supports_flashattention:
+        results.append(
+            check_close(
+                "flashattention",
+                flash_ext.FlashAttention(q, k, v),
+                expected,
+                rtol=1e-4,
+                atol=1e-4,
+            )
         )
+
+    return tuple(results)
 
 
 def benchmark_shape(
@@ -141,7 +154,7 @@ def benchmark_shape(
     repeats: int,
 ) -> None:
     q, k, v = make_inputs(shape)
-    validate_outputs(
+    correctness = validate_outputs(
         fused_ext,
         flash_ext,
         scaled_qk_ext,
@@ -211,6 +224,8 @@ def benchmark_shape(
     print(f"\nshape={shape.label}")
     if not shape.supports_flashattention:
         print("flashattention skipped: requires Dh=64 and T divisible by 32")
+    for result in correctness:
+        print(format_correctness(result))
     print(format_table(timings))
     print(format_comparison(timings[0], timings[1]))
     print(format_comparison(timings[0], timings[2]))

@@ -9,8 +9,10 @@ import torch.nn.functional as F
 from benchmarks.core import (
     BenchmarkConfig,
     BenchmarkEnv,
+    check_close,
     effective_bandwidth_gbs,
     format_comparison,
+    format_correctness,
     format_run_header,
     format_table,
     time_cuda,
@@ -108,17 +110,21 @@ def benchmark_shape(
     x, weight = make_inputs(shape)
 
     expected = pytorch_patchembedding(x, weight, shape)
-    torch.testing.assert_close(
-        ext_v1.patchembedding(x, weight),
-        expected,
-        rtol=1e-4,
-        atol=1e-4,
-    )
-    torch.testing.assert_close(
-        ext_v2.patchembeddingv2(x, weight),
-        expected,
-        rtol=1e-4,
-        atol=1e-4,
+    correctness = (
+        check_close(
+            "patchembedding",
+            ext_v1.patchembedding(x, weight),
+            expected,
+            rtol=1e-4,
+            atol=1e-4,
+        ),
+        check_close(
+            "patchembeddingv2",
+            ext_v2.patchembeddingv2(x, weight),
+            expected,
+            rtol=1e-4,
+            atol=1e-4,
+        ),
     )
 
     timings = (
@@ -148,6 +154,8 @@ def benchmark_shape(
     bytes_per_call = logical_bytes(shape)
 
     print(f"\nshape={shape.label}")
+    for result in correctness:
+        print(format_correctness(result))
     print(format_table(timings))
     for timing in timings:
         bandwidth = effective_bandwidth_gbs(bytes_per_call, timing)

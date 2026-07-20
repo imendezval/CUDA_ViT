@@ -1,11 +1,15 @@
 import pytest
+import torch
 
 from benchmarks.core import (
     BenchmarkConfig,
     BenchmarkEnv,
+    Correctness,
     Timing,
+    check_close,
     effective_bandwidth_gbs,
     format_comparison,
+    format_correctness,
     format_run_header,
     format_table,
     format_timing,
@@ -80,4 +84,48 @@ def test_format_run_header_includes_environment_and_config():
             "PyTorch CUDA: 12.8",
             "warmup=10 iterations=50 repeats=3",
         ]
+    )
+
+
+def test_check_close_returns_error_stats():
+    actual = torch.tensor([1.0, 2.0, 3.25])
+    expected = torch.tensor([1.0, 2.5, 3.0])
+
+    result = check_close(
+        "custom",
+        actual,
+        expected,
+        rtol=1.0,
+        atol=1.0,
+    )
+
+    assert result == Correctness(
+        name="custom",
+        max_abs_error=0.5,
+        mean_abs_error=0.25,
+        rtol=1.0,
+        atol=1.0,
+    )
+
+
+def test_check_close_raises_when_tolerance_fails():
+    actual = torch.tensor([1.0])
+    expected = torch.tensor([2.0])
+
+    with pytest.raises(AssertionError):
+        check_close("custom", actual, expected, rtol=0.0, atol=0.0)
+
+
+def test_format_correctness_is_stable():
+    result = Correctness(
+        name="custom",
+        max_abs_error=0.000123,
+        mean_abs_error=0.0000456,
+        rtol=1e-4,
+        atol=1e-5,
+    )
+
+    assert format_correctness(result) == (
+        "custom: max_abs_error=0.000123 mean_abs_error=4.56e-05 "
+        "rtol=0.0001 atol=1e-05"
     )

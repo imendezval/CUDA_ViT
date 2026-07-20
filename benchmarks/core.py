@@ -55,6 +55,15 @@ class BenchmarkEnv:
         )
 
 
+@dataclass(frozen=True)
+class Correctness:
+    name: str
+    max_abs_error: float
+    mean_abs_error: float
+    rtol: float
+    atol: float
+
+
 def time_cuda(
     name: str,
     op: Callable[[], object],
@@ -102,11 +111,38 @@ def effective_bandwidth_gbs(bytes_per_call: int, timing: Timing) -> float:
     return bytes_per_call / (timing.median_ms * 1e-3) / 1e9
 
 
+def check_close(
+    name: str,
+    actual: torch.Tensor,
+    expected: torch.Tensor,
+    *,
+    rtol: float,
+    atol: float,
+) -> Correctness:
+    torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
+    abs_error = (actual - expected).abs()
+    return Correctness(
+        name=name,
+        max_abs_error=abs_error.max().item(),
+        mean_abs_error=abs_error.mean().item(),
+        rtol=rtol,
+        atol=atol,
+    )
+
+
 def format_timing(timing: Timing) -> str:
     return (
         f"{timing.name}: median={timing.median_ms:.4f} ms "
         f"mean={timing.mean_ms:.4f} ms min={timing.min_ms:.4f} ms "
         f"max={timing.max_ms:.4f} ms"
+    )
+
+
+def format_correctness(result: Correctness) -> str:
+    return (
+        f"{result.name}: max_abs_error={result.max_abs_error:.6g} "
+        f"mean_abs_error={result.mean_abs_error:.6g} "
+        f"rtol={result.rtol:g} atol={result.atol:g}"
     )
 
 
