@@ -51,26 +51,16 @@ __global__ void PatchEmbeddingV3_kernel(
 
     const int num_patch_el = patch_size * patch_size * C_img;
 
-    // Each thread -> multiple pixels
     const int tid = static_cast<int>(threadIdx.x);
 
     const int group_id = tid / group_size;
     const int lane_id = tid % group_size;
 
-    // Prep shared mem
-    // [patches_per_block * num_patch_el patch vals]
-    // [groups_per_block * num_patch_el weight vals]
-    extern __shared__ float shared[];
-
-    float* patch_shared = shared;
-
-    float* weight_shared =
-        patch_shared + patches_per_block * num_patch_el;
+    // patches in shared mem, weights in registers
+    extern __shared__ float patch_shared[];
 
     // Bring multiple patches into shared memory
-    for (int patch_round = 0;
-         patch_round < patches_per_block;
-         patch_round++) {
+    for (int patch_round = 0; patch_round < patches_per_block; patch_round++) {
 
         const int patch_idx = first_patch_idx + patch_round;
         const bool active_patch = patch_idx < num_patches;
@@ -84,12 +74,9 @@ __global__ void PatchEmbeddingV3_kernel(
             const int start_x = patch_x * patch_size;
             const int start_y = patch_y * patch_size;
 
-            float* patch_row =
-                patch_shared + patch_round * num_patch_el;
+            float* patch_row = patch_shared + patch_round * num_patch_el;
 
-            for (int col = tid;
-                 col < num_patch_el;
-                 col += blockDim.x) {
+            for (int col = tid; col < num_patch_el; col += blockDim.x) {
 
                 // Map pixel idx as row vector -> pixel address in memory
                 const int c = col / (patch_size * patch_size);
@@ -117,81 +104,69 @@ __global__ void PatchEmbeddingV3_kernel(
     const int emb_rounds =
         (emb_size + groups_per_block - 1) / groups_per_block;
 
-    for (int emb_round = 0;
-         emb_round < emb_rounds;
-         emb_round++) {
+    for (int emb_round = 0; emb_round < emb_rounds; emb_round++) {
 
         const int out_el =
             emb_round * groups_per_block + group_id;
 
         const bool active_embedding = out_el < emb_size;
 
-        float* group_weight_shared =
-            weight_shared + group_id * num_patch_el;
-
-        // each warp brings one embedding weight row into shared memory
         if (active_embedding) {
-            const float* row_w =
-                W + static_cast<int64_t>(out_el) * num_patch_el;
+            float local_sums[patches_per_block] = {0.0f};
 
-            for (int col = lane_id;
-                 col < num_patch_el;
-                 col += group_size) {
+            // Each weight is loaded once and reused for all cached patches
+            for (int col = lane_id; col < num_patch_el; col += group_size) {
 
-                group_weight_shared[col] = row_w[col];
+                const float weight = W[static_cast<int64_t>(out_el) * num_patch_el + col];
+
+                for (int patch_round = 0; patch_round < patches_per_block; patch_round++) {
+
+                    const int patch_idx =
+                        first_patch_idx + patch_round;
+
+                    const bool active_patch =
+                        patch_idx < num_patches;
+
+                    if (active_patch) {
+                        const float* patch_row = patch_shared + patch_round * num_patch_el;
+
+                        local_sums[patch_round] += weight * patch_row[col];
+                    }
+                }
             }
-        }
-        __syncthreads();
 
-        // apply the cached weight row to all patches handled by the block
-        for (int patch_round = 0;
-             patch_round < patches_per_block;
-             patch_round++) {
+            // One warp reduction for each patch
+            for (int offset = group_size / 2; offset > 0; offset >>= 1) {
 
-            const int patch_idx = first_patch_idx + patch_round;
-            const bool active_patch = patch_idx < num_patches;
+                for (int patch_round = 0; patch_round < patches_per_block; patch_round++) {
 
-            if (active_embedding && active_patch) {
-                const float* patch_row =
-                    patch_shared + patch_round * num_patch_el;
-
-                float local_sum = 0.0f;
-
-                // For loop to let lanes cover all patch pixels
-                for (int col = lane_id;
-                     col < num_patch_el;
-                     col += group_size) {
-
-                    // Main calculation
-                    local_sum +=
-                        group_weight_shared[col] * patch_row[col];
+                    local_sums[patch_round] +=
+                        __shfl_down_sync(
+                            0xffffffff,
+                            local_sums[patch_round],
+                            offset
+                        );
                 }
+            }
 
-                // warp shuffle instead of reduction with shared memory
-                for (int offset = group_size / 2;
-                     offset > 0;
-                     offset >>= 1) {
+            if (lane_id == 0) {
+                for (int patch_round = 0; patch_round < patches_per_block; patch_round++) {
 
-                    local_sum += __shfl_down_sync(
-                        0xffffffff,
-                        local_sum,
-                        offset
-                    );
-                }
+                    const int patch_idx = first_patch_idx + patch_round;
 
-                if (lane_id == 0) {
-                    float* out_row =
-                        out
-                        + (batch_idx * num_patches + patch_idx)
-                        * emb_size;
+                    const bool active_patch = patch_idx < num_patches;
 
-                    out_row[out_el] = local_sum;
+                    if (active_patch) {
+                        float* out_row =
+                            out
+                            + (batch_idx * num_patches + patch_idx)
+                            * emb_size;
+
+                        out_row[out_el] = local_sums[patch_round];
+                    }
                 }
             }
         }
-
-        // sync since shared memory overwritten during next emb round
-        __syncthreads();
     }
 }
 
@@ -306,9 +281,7 @@ torch::Tensor PatchEmbeddingV3_cuda(
         B64 * patch_blocks_per_batch;
 
     const size_t shared_bytes =
-        static_cast<size_t>(
-            patches_per_block + groups_per_block
-        )
+        static_cast<size_t>(patches_per_block)
         * num_patch_el64
         * sizeof(float);
 
