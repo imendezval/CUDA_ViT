@@ -1,4 +1,4 @@
-from benchmarks.shapes import ATTENTION_OP_SHAPES, ATTENTION_SHAPES, AttentionShape
+from benchmarks.common.shapes import ATTENTION_OP_SHAPES, ATTENTION_SHAPES, AttentionShape
 
 
 def test_attention_shape_label_is_stable():

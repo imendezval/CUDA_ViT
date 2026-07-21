@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from benchmarks.core import (
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     Correctness,

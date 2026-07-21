@@ -1,4 +1,4 @@
-from benchmarks.plot import (
+from benchmarks.reporting.plot import (
     extract_sweep_label,
     extra_memory_series_vs_sdpa,
     metric_value,

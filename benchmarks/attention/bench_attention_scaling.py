@@ -6,8 +6,8 @@ from collections.abc import Iterable
 import torch
 import torch.nn.functional as F
 
-from benchmarks.bench_attention import custom_attention, pytorch_attention, validate_outputs
-from benchmarks.core import (
+from benchmarks.attention.bench_attention import custom_attention, pytorch_attention, validate_outputs
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     Timing,
@@ -16,7 +16,7 @@ from benchmarks.core import (
     throughput_scale,
     time_cuda,
 )
-from benchmarks.shapes import AttentionShape
+from benchmarks.common.shapes import AttentionShape
 from cuda_vit.ops.attention_v_ext import load_attention_v
 from cuda_vit.ops.flashattention_ext import load_flashattention
 from cuda_vit.ops.fused_attention_ext import load_fused_attention

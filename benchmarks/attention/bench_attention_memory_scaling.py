@@ -4,10 +4,10 @@ import argparse
 
 import torch
 
-from benchmarks.bench_attention_memory import VARIANTS, measure_memory
-from benchmarks.core import BenchmarkConfig, BenchmarkEnv, format_run_header
-from benchmarks.profile_attention import make_inputs, make_variant, run_warmup
-from benchmarks.shapes import AttentionShape
+from benchmarks.attention.bench_attention_memory import VARIANTS, measure_memory
+from benchmarks.common.core import BenchmarkConfig, BenchmarkEnv, format_run_header
+from benchmarks.attention.profile_attention import make_inputs, make_variant, run_warmup
+from benchmarks.common.shapes import AttentionShape
 
 
 SEQUENCE_SWEEP = (

@@ -1,4 +1,4 @@
-from benchmarks.generate_plots import generate_plots, plot_specs
+from benchmarks.reporting.generate_plots import generate_plots, plot_specs
 
 
 PATCH_CSV = "\n".join(

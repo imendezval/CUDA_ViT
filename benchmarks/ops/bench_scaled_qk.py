@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 
 import torch
-import torch.nn.functional as F
 
-from benchmarks.core import (
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,
@@ -17,62 +15,40 @@ from benchmarks.core import (
     format_table,
     time_cuda,
 )
-from cuda_vit.ops.linear_forward_ext import load_linear_forward
+from benchmarks.common.shapes import ATTENTION_OP_SHAPES, AttentionShape
+from cuda_vit.ops.scaled_qk_ext import load_scaled_qk
 
 
-@dataclass(frozen=True)
-class LinearShape:
-    rows: int
-    in_features: int
-    out_features: int
-
-    @property
-    def label(self) -> str:
-        return f"R{self.rows}_In{self.in_features}_Out{self.out_features}"
-
-    @property
-    def flops(self) -> int:
-        return 2 * self.rows * self.in_features * self.out_features
-
-
-SHAPES = (
-    LinearShape(2, 64, 128),
-    LinearShape(8, 128, 512),
-    LinearShape(394, 768, 2304),
-    LinearShape(394, 768, 3072),
-    LinearShape(1576, 384, 1536),
-)
-
-
-def make_inputs(shape: LinearShape) -> tuple[torch.Tensor, torch.Tensor]:
-    x = torch.randn(
-        shape.rows,
-        shape.in_features,
+def make_inputs(shape: AttentionShape) -> tuple[torch.Tensor, torch.Tensor]:
+    q = torch.randn(
+        shape.batch,
+        shape.heads,
+        shape.tokens,
+        shape.head_dim,
         device="cuda",
         dtype=torch.float32,
     )
-    weight = torch.randn(
-        shape.out_features,
-        shape.in_features,
-        device="cuda",
-        dtype=torch.float32,
-    )
-    return x, weight
+    k = torch.randn_like(q)
+    return q, k
+
+
+def pytorch_scaled_qk(q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
+    return torch.matmul(q, k.transpose(-2, -1)) / (q.shape[-1] ** 0.5)
 
 
 def benchmark_shape(
     ext: object,
-    shape: LinearShape,
+    shape: AttentionShape,
     *,
     warmup: int,
     iterations: int,
     repeats: int,
 ) -> None:
-    x, weight = make_inputs(shape)
-    expected = F.linear(x, weight, bias=None)
+    q, k = make_inputs(shape)
+    expected = pytorch_scaled_qk(q, k)
     correctness = check_close(
-        "linear_forward",
-        ext.linear_forward(x, weight),
+        "scaled_qk",
+        ext.scaled_qk(q, k),
         expected,
         rtol=1e-4,
         atol=1e-4,
@@ -80,15 +56,15 @@ def benchmark_shape(
 
     timings = (
         time_cuda(
-            "pytorch_linear",
-            lambda: F.linear(x, weight, bias=None),
+            "pytorch_scaled_qk",
+            lambda: pytorch_scaled_qk(q, k),
             warmup=warmup,
             iterations=iterations,
             repeats=repeats,
         ),
         time_cuda(
-            "linear_forward",
-            lambda: ext.linear_forward(x, weight),
+            "scaled_qk",
+            lambda: ext.scaled_qk(q, k),
             warmup=warmup,
             iterations=iterations,
             repeats=repeats,
@@ -99,7 +75,7 @@ def benchmark_shape(
     print(format_correctness(correctness))
     print(format_table(timings))
     for timing in timings:
-        throughput = effective_tflops(shape.flops, timing)
+        throughput = effective_tflops(shape.attention_matmul_flops, timing)
         print(f"{timing.name}: estimated_throughput={throughput:.2f} TFLOP/s")
     print(format_comparison(timings[0], timings[1]))
 
@@ -128,11 +104,11 @@ def main() -> None:
         iterations=args.iterations,
         repeats=args.repeats,
     )
-    print(format_run_header("Linear Forward Benchmark", BenchmarkEnv.current(), config))
+    print(format_run_header("Scaled QK Benchmark", BenchmarkEnv.current(), config))
 
-    ext = load_linear_forward()
+    ext = load_scaled_qk()
 
-    for shape in SHAPES:
+    for shape in ATTENTION_OP_SHAPES:
         benchmark_shape(
             ext,
             shape,

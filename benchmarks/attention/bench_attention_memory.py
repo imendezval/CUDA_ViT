@@ -5,9 +5,9 @@ from collections.abc import Callable
 
 import torch
 
-from benchmarks.core import BenchmarkConfig, BenchmarkEnv, format_run_header
-from benchmarks.profile_attention import make_inputs, make_variant, run_warmup
-from benchmarks.shapes import AttentionShape
+from benchmarks.common.core import BenchmarkConfig, BenchmarkEnv, format_run_header
+from benchmarks.attention.profile_attention import make_inputs, make_variant, run_warmup
+from benchmarks.common.shapes import AttentionShape
 
 
 Variant = Callable[[], torch.Tensor]

@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 
 import torch
+import torch.nn.functional as F
 
-from benchmarks.core import (
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,
@@ -15,12 +16,21 @@ from benchmarks.core import (
     format_table,
     time_cuda,
 )
-from benchmarks.shapes import ATTENTION_OP_SHAPES, AttentionShape
-from cuda_vit.ops.scaled_qk_ext import load_scaled_qk
+from benchmarks.common.shapes import ATTENTION_SHAPES, AttentionShape
+from cuda_vit.ops.attention_v_ext import load_attention_v
 
 
 def make_inputs(shape: AttentionShape) -> tuple[torch.Tensor, torch.Tensor]:
-    q = torch.randn(
+    scores = torch.randn(
+        shape.batch,
+        shape.heads,
+        shape.tokens,
+        shape.tokens,
+        device="cuda",
+        dtype=torch.float32,
+    )
+    probs = F.softmax(scores, dim=-1).contiguous()
+    v = torch.randn(
         shape.batch,
         shape.heads,
         shape.tokens,
@@ -28,12 +38,7 @@ def make_inputs(shape: AttentionShape) -> tuple[torch.Tensor, torch.Tensor]:
         device="cuda",
         dtype=torch.float32,
     )
-    k = torch.randn_like(q)
-    return q, k
-
-
-def pytorch_scaled_qk(q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
-    return torch.matmul(q, k.transpose(-2, -1)) / (q.shape[-1] ** 0.5)
+    return probs, v
 
 
 def benchmark_shape(
@@ -44,11 +49,11 @@ def benchmark_shape(
     iterations: int,
     repeats: int,
 ) -> None:
-    q, k = make_inputs(shape)
-    expected = pytorch_scaled_qk(q, k)
+    probs, v = make_inputs(shape)
+    expected = torch.matmul(probs, v)
     correctness = check_close(
-        "scaled_qk",
-        ext.scaled_qk(q, k),
+        "attention_v",
+        ext.attention_v(probs, v),
         expected,
         rtol=1e-4,
         atol=1e-4,
@@ -56,15 +61,15 @@ def benchmark_shape(
 
     timings = (
         time_cuda(
-            "pytorch_scaled_qk",
-            lambda: pytorch_scaled_qk(q, k),
+            "pytorch_attention_v",
+            lambda: torch.matmul(probs, v),
             warmup=warmup,
             iterations=iterations,
             repeats=repeats,
         ),
         time_cuda(
-            "scaled_qk",
-            lambda: ext.scaled_qk(q, k),
+            "attention_v",
+            lambda: ext.attention_v(probs, v),
             warmup=warmup,
             iterations=iterations,
             repeats=repeats,
@@ -104,11 +109,11 @@ def main() -> None:
         iterations=args.iterations,
         repeats=args.repeats,
     )
-    print(format_run_header("Scaled QK Benchmark", BenchmarkEnv.current(), config))
+    print(format_run_header("Attention V Benchmark", BenchmarkEnv.current(), config))
 
-    ext = load_scaled_qk()
+    ext = load_attention_v()
 
-    for shape in ATTENTION_OP_SHAPES:
+    for shape in ATTENTION_SHAPES:
         benchmark_shape(
             ext,
             shape,

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
 
-from benchmarks.core import (
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,
@@ -16,44 +17,62 @@ from benchmarks.core import (
     format_table,
     time_cuda,
 )
-from benchmarks.shapes import ATTENTION_SHAPES, AttentionShape
-from cuda_vit.ops.attention_v_ext import load_attention_v
+from cuda_vit.ops.linear_forward_ext import load_linear_forward
 
 
-def make_inputs(shape: AttentionShape) -> tuple[torch.Tensor, torch.Tensor]:
-    scores = torch.randn(
-        shape.batch,
-        shape.heads,
-        shape.tokens,
-        shape.tokens,
+@dataclass(frozen=True)
+class LinearShape:
+    rows: int
+    in_features: int
+    out_features: int
+
+    @property
+    def label(self) -> str:
+        return f"R{self.rows}_In{self.in_features}_Out{self.out_features}"
+
+    @property
+    def flops(self) -> int:
+        return 2 * self.rows * self.in_features * self.out_features
+
+
+SHAPES = (
+    LinearShape(2, 64, 128),
+    LinearShape(8, 128, 512),
+    LinearShape(394, 768, 2304),
+    LinearShape(394, 768, 3072),
+    LinearShape(1576, 384, 1536),
+)
+
+
+def make_inputs(shape: LinearShape) -> tuple[torch.Tensor, torch.Tensor]:
+    x = torch.randn(
+        shape.rows,
+        shape.in_features,
         device="cuda",
         dtype=torch.float32,
     )
-    probs = F.softmax(scores, dim=-1).contiguous()
-    v = torch.randn(
-        shape.batch,
-        shape.heads,
-        shape.tokens,
-        shape.head_dim,
+    weight = torch.randn(
+        shape.out_features,
+        shape.in_features,
         device="cuda",
         dtype=torch.float32,
     )
-    return probs, v
+    return x, weight
 
 
 def benchmark_shape(
     ext: object,
-    shape: AttentionShape,
+    shape: LinearShape,
     *,
     warmup: int,
     iterations: int,
     repeats: int,
 ) -> None:
-    probs, v = make_inputs(shape)
-    expected = torch.matmul(probs, v)
+    x, weight = make_inputs(shape)
+    expected = F.linear(x, weight, bias=None)
     correctness = check_close(
-        "attention_v",
-        ext.attention_v(probs, v),
+        "linear_forward",
+        ext.linear_forward(x, weight),
         expected,
         rtol=1e-4,
         atol=1e-4,
@@ -61,15 +80,15 @@ def benchmark_shape(
 
     timings = (
         time_cuda(
-            "pytorch_attention_v",
-            lambda: torch.matmul(probs, v),
+            "pytorch_linear",
+            lambda: F.linear(x, weight, bias=None),
             warmup=warmup,
             iterations=iterations,
             repeats=repeats,
         ),
         time_cuda(
-            "attention_v",
-            lambda: ext.attention_v(probs, v),
+            "linear_forward",
+            lambda: ext.linear_forward(x, weight),
             warmup=warmup,
             iterations=iterations,
             repeats=repeats,
@@ -80,7 +99,7 @@ def benchmark_shape(
     print(format_correctness(correctness))
     print(format_table(timings))
     for timing in timings:
-        throughput = effective_tflops(shape.attention_matmul_flops, timing)
+        throughput = effective_tflops(shape.flops, timing)
         print(f"{timing.name}: estimated_throughput={throughput:.2f} TFLOP/s")
     print(format_comparison(timings[0], timings[1]))
 
@@ -109,11 +128,11 @@ def main() -> None:
         iterations=args.iterations,
         repeats=args.repeats,
     )
-    print(format_run_header("Attention V Benchmark", BenchmarkEnv.current(), config))
+    print(format_run_header("Linear Forward Benchmark", BenchmarkEnv.current(), config))
 
-    ext = load_attention_v()
+    ext = load_linear_forward()
 
-    for shape in ATTENTION_SHAPES:
+    for shape in SHAPES:
         benchmark_shape(
             ext,
             shape,

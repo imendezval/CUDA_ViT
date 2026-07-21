@@ -4,7 +4,7 @@ import argparse
 
 import torch
 
-from benchmarks.bench_vit import (
+from benchmarks.vit.bench_vit import (
     Variant,
     VitShape,
     load_extensions,
@@ -12,7 +12,7 @@ from benchmarks.bench_vit import (
     make_weights,
     vit_forward,
 )
-from benchmarks.core import BenchmarkConfig, BenchmarkEnv, check_close, format_run_header, time_cuda
+from benchmarks.common.core import BenchmarkConfig, BenchmarkEnv, check_close, format_run_header, time_cuda
 
 
 VARIANTS = (

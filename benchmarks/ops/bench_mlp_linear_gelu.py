@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
 
-from benchmarks.core import (
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,

@@ -8,9 +8,9 @@ import torch
 import torch.nn.functional as F
 from torch.profiler import ProfilerActivity, profile
 
-from benchmarks.bench_attention import custom_attention, pytorch_attention
-from benchmarks.core import BenchmarkConfig, BenchmarkEnv, format_run_header
-from benchmarks.shapes import AttentionShape
+from benchmarks.attention.bench_attention import custom_attention, pytorch_attention
+from benchmarks.common.core import BenchmarkConfig, BenchmarkEnv, format_run_header
+from benchmarks.common.shapes import AttentionShape
 from cuda_vit.ops.attention_v_ext import load_attention_v
 from cuda_vit.ops.flashattention_ext import load_flashattention
 from cuda_vit.ops.fused_attention_ext import load_fused_attention

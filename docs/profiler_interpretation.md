@@ -9,7 +9,7 @@ and memory went.
 Run:
 
 ```bash
-python -m benchmarks.profile_attention --variant custom_3_kernel
+python -m benchmarks.attention.profile_attention --variant custom_3_kernel
 ```
 
 Useful columns:
@@ -36,7 +36,7 @@ Use:
 Run:
 
 ```bash
-python -m benchmarks.bench_attention_memory
+python -m benchmarks.attention.bench_attention_memory
 ```
 
 Columns:

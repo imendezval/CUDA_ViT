@@ -1,7 +1,7 @@
 import pytest
 
-from benchmarks.bench_vit import SHAPES, VARIANTS, VitShape, format_rows, selected_shapes
-from benchmarks.core import Timing
+from benchmarks.vit.bench_vit import SHAPES, VARIANTS, VitShape, format_rows, selected_shapes
+from benchmarks.common.core import Timing
 
 
 def test_vit_shape_properties():

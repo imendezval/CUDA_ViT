@@ -1,4 +1,4 @@
-from benchmarks.report import (
+from benchmarks.common.report import (
     PATCH_SCALING_HEADER,
     read_rows,
     report_attention_memory,

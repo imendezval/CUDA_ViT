@@ -5,13 +5,13 @@ from collections.abc import Iterable
 
 import torch
 
-from benchmarks.bench_patchembedding import (
+from benchmarks.patch_embedding.bench_patchembedding import (
     PatchEmbeddingShape,
     logical_bytes,
     make_inputs,
     pytorch_patchembedding,
 )
-from benchmarks.core import (
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     Timing,

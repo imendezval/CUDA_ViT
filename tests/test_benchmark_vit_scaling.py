@@ -1,4 +1,4 @@
-from benchmarks.bench_vit_scaling import BATCH_SWEEP, IMAGE_SWEEP, PATCHES_SWEEP, VARIANTS
+from benchmarks.vit.bench_vit_scaling import BATCH_SWEEP, IMAGE_SWEEP, PATCHES_SWEEP, VARIANTS
 
 
 def test_vit_scaling_sweeps_change_one_dimension():

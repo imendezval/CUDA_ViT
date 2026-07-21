@@ -5,7 +5,7 @@ import argparse
 import torch
 import torch.nn.functional as F
 
-from benchmarks.core import (
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,
@@ -16,78 +16,57 @@ from benchmarks.core import (
     format_table,
     time_cuda,
 )
-from cuda_vit.ops.layernorm_ext import load_layernorm
+from cuda_vit.ops.softmax_ext import load_softmax
 
 
 SHAPES = (
-    (1, 1, 31),
-    (2, 3, 256),
-    (2, 3, 257),
-    (8, 197, 384),
-    (2, 197, 768),
+    (1, 31),
+    (2, 256),
+    (2, 257),
+    (8, 197),
+    (2 * 4 * 197, 197),
+    (2 * 8 * 384, 384),
 )
 
 
-def make_inputs(shape: tuple[int, ...]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    hidden = shape[-1]
-    x = torch.randn(shape, device="cuda", dtype=torch.float32)
-    gamma = torch.randn(hidden, device="cuda", dtype=torch.float32)
-    beta = torch.randn(hidden, device="cuda", dtype=torch.float32)
-    return x, gamma, beta
+def make_input(shape: tuple[int, int]) -> torch.Tensor:
+    return torch.randn(shape, device="cuda", dtype=torch.float32)
 
 
-def pytorch_layernorm(
-    x: torch.Tensor,
-    gamma: torch.Tensor,
-    beta: torch.Tensor,
-    eps: float,
-) -> torch.Tensor:
-    return F.layer_norm(
-        x,
-        normalized_shape=(x.shape[-1],),
-        weight=gamma,
-        bias=beta,
-        eps=eps,
-    )
-
-
-def logical_bytes(shape: tuple[int, ...]) -> int:
-    elements = 1
-    for dim in shape:
-        elements *= dim
-    return 4 * elements * 4
+def logical_bytes(shape: tuple[int, int]) -> int:
+    rows, cols = shape
+    return 2 * rows * cols * 4
 
 
 def benchmark_shape(
     ext: object,
-    shape: tuple[int, ...],
+    shape: tuple[int, int],
     *,
-    eps: float,
     warmup: int,
     iterations: int,
     repeats: int,
 ) -> None:
-    x, gamma, beta = make_inputs(shape)
-    expected = pytorch_layernorm(x, gamma, beta, eps)
+    x = make_input(shape)
+    expected = F.softmax(x, dim=-1)
     correctness = check_close(
-        "layernorm",
-        ext.layernorm(x, gamma, beta, eps),
+        "softmax",
+        ext.softmax(x),
         expected,
         rtol=1e-5,
-        atol=1e-5,
+        atol=1e-6,
     )
 
     timings = (
         time_cuda(
-            "pytorch_layer_norm",
-            lambda: pytorch_layernorm(x, gamma, beta, eps),
+            "pytorch_softmax",
+            lambda: F.softmax(x, dim=-1),
             warmup=warmup,
             iterations=iterations,
             repeats=repeats,
         ),
         time_cuda(
-            "layernorm",
-            lambda: ext.layernorm(x, gamma, beta, eps),
+            "softmax",
+            lambda: ext.softmax(x),
             warmup=warmup,
             iterations=iterations,
             repeats=repeats,
@@ -107,7 +86,6 @@ def benchmark_shape(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--eps", type=float, default=1e-5)
     parser.add_argument("--warmup", type=int, default=25)
     parser.add_argument("--iterations", type=int, default=100)
     parser.add_argument("--repeats", type=int, default=5)
@@ -127,15 +105,14 @@ def main() -> None:
         iterations=args.iterations,
         repeats=args.repeats,
     )
-    print(format_run_header("LayerNorm Benchmark", BenchmarkEnv.current(), config))
+    print(format_run_header("Softmax Benchmark", BenchmarkEnv.current(), config))
 
-    ext = load_layernorm()
+    ext = load_softmax()
 
     for shape in SHAPES:
         benchmark_shape(
             ext,
             shape,
-            eps=args.eps,
             warmup=args.warmup,
             iterations=args.iterations,
             repeats=args.repeats,

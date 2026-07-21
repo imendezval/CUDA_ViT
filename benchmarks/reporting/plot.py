@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from benchmarks.report import (
+from benchmarks.common.report import (
     ATTENTION_MEMORY_HEADER,
     ATTENTION_MEMORY_SCALING_HEADER,
     ATTENTION_SCALING_HEADER,

@@ -4,7 +4,7 @@ import argparse
 
 import torch
 
-from benchmarks.core import (
+from benchmarks.common.core import (
     BenchmarkConfig,
     BenchmarkEnv,
     check_close,

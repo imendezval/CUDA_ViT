@@ -4,7 +4,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-from benchmarks.plot import (
+from benchmarks.reporting.plot import (
     plot_attention_extra_memory_scaling,
     plot_attention_memory_scaling,
     plot_attention_scaling,

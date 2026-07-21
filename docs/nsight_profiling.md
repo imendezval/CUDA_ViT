@@ -19,7 +19,7 @@ nsys profile \
   --trace=cuda,nvtx,osrt \
   --cuda-memory-usage=true \
   --output=profiles/nsys_attention_pytorch_sdpa \
-  python -m benchmarks.profile_attention \
+  python -m benchmarks.attention.profile_attention \
     --variant pytorch_sdpa \
     --warmup 5 \
     --iterations 10
@@ -32,7 +32,7 @@ nsys profile \
   --trace=cuda,nvtx,osrt \
   --cuda-memory-usage=true \
   --output=profiles/nsys_attention_custom_3_kernel \
-  python -m benchmarks.profile_attention \
+  python -m benchmarks.attention.profile_attention \
     --variant custom_3_kernel \
     --warmup 5 \
     --iterations 10
@@ -45,7 +45,7 @@ nsys profile \
   --trace=cuda,nvtx,osrt \
   --cuda-memory-usage=true \
   --output=profiles/nsys_attention_fused \
-  python -m benchmarks.profile_attention \
+  python -m benchmarks.attention.profile_attention \
     --variant fused_attention \
     --warmup 5 \
     --iterations 10
@@ -58,7 +58,7 @@ nsys profile \
   --trace=cuda,nvtx,osrt \
   --cuda-memory-usage=true \
   --output=profiles/nsys_attention_flash \
-  python -m benchmarks.profile_attention \
+  python -m benchmarks.attention.profile_attention \
     --variant flashattention \
     --batch 2 \
     --heads 3 \
@@ -95,7 +95,7 @@ ncu \
   --target-processes all \
   --kernel-name regex:scaled \
   --export profiles/ncu_scaled_qk \
-  python -m benchmarks.bench_scaled_qk \
+  python -m benchmarks.ops.bench_scaled_qk \
     --warmup 3 \
     --iterations 5 \
     --repeats 1
@@ -109,7 +109,7 @@ ncu \
   --target-processes all \
   --kernel-name regex:softmax \
   --export profiles/ncu_softmax \
-  python -m benchmarks.bench_softmax \
+  python -m benchmarks.ops.bench_softmax \
     --warmup 3 \
     --iterations 5 \
     --repeats 1
@@ -123,7 +123,7 @@ ncu \
   --target-processes all \
   --kernel-name regex:attention \
   --export profiles/ncu_attention_v \
-  python -m benchmarks.bench_attention_v \
+  python -m benchmarks.ops.bench_attention_v \
     --warmup 3 \
     --iterations 5 \
     --repeats 1
@@ -137,7 +137,7 @@ ncu \
   --target-processes all \
   --kernel-name regex:fused \
   --export profiles/ncu_fused_attention \
-  python -m benchmarks.bench_attention \
+  python -m benchmarks.attention.bench_attention \
     --warmup 3 \
     --iterations 5 \
     --repeats 1
@@ -151,7 +151,7 @@ ncu \
   --target-processes all \
   --kernel-name regex:Patch \
   --export profiles/ncu_patchembedding \
-  python -m benchmarks.bench_patchembedding \
+  python -m benchmarks.patch_embedding.bench_patchembedding \
     --warmup 3 \
     --iterations 5 \
     --repeats 1

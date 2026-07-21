@@ -1,4 +1,4 @@
-from benchmarks.generate_tables import (
+from benchmarks.reporting.generate_tables import (
     attention_memory_scaling_table,
     attention_performance_summary,
     generate_tables,

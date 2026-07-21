@@ -5,8 +5,8 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import median
 
-from benchmarks.plot import display_name
-from benchmarks.report import (
+from benchmarks.reporting.plot import display_name
+from benchmarks.common.report import (
     ATTENTION_MEMORY_SCALING_HEADER,
     ATTENTION_SCALING_HEADER,
     PATCH_SCALING_HEADER,
