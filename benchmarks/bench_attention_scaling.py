@@ -29,6 +29,7 @@ BATCH_SWEEP = (
     AttentionShape(2, 3, 192, 64),
     AttentionShape(4, 3, 192, 64),
     AttentionShape(8, 3, 192, 64),
+    AttentionShape(16, 3, 192, 64),
 )
 
 SEQUENCE_SWEEP = (
@@ -38,6 +39,8 @@ SEQUENCE_SWEEP = (
     AttentionShape(2, 3, 192, 64),
     AttentionShape(2, 3, 197, 64),
     AttentionShape(2, 3, 256, 64),
+    AttentionShape(2, 3, 384, 64),
+    AttentionShape(2, 3, 512, 64),
 )
 
 HEAD_SWEEP = (
@@ -45,6 +48,7 @@ HEAD_SWEEP = (
     AttentionShape(2, 3, 192, 64),
     AttentionShape(2, 6, 192, 64),
     AttentionShape(2, 12, 192, 64),
+    AttentionShape(2, 24, 192, 64),
 )
 
 HEAD_DIM_SWEEP = (

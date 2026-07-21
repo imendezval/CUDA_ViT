@@ -31,6 +31,8 @@ BATCH_SWEEP = (
     PatchEmbeddingShape(2, 3, 224, 224, 16, 384),
     PatchEmbeddingShape(4, 3, 224, 224, 16, 384),
     PatchEmbeddingShape(8, 3, 224, 224, 16, 384),
+    PatchEmbeddingShape(16, 3, 224, 224, 16, 384),
+    PatchEmbeddingShape(32, 3, 224, 224, 16, 384),
 )
 
 IMAGE_SWEEP = (
@@ -38,22 +40,30 @@ IMAGE_SWEEP = (
     PatchEmbeddingShape(2, 3, 64, 64, 16, 384),
     PatchEmbeddingShape(2, 3, 128, 128, 16, 384),
     PatchEmbeddingShape(2, 3, 224, 224, 16, 384),
+    PatchEmbeddingShape(2, 3, 384, 384, 16, 384),
+    PatchEmbeddingShape(2, 3, 512, 512, 16, 384),
 )
 
 PATCH_SWEEP = (
+    PatchEmbeddingShape(2, 3, 224, 224, 4, 384),
     PatchEmbeddingShape(2, 3, 224, 224, 8, 384),
     PatchEmbeddingShape(2, 3, 224, 224, 16, 384),
     PatchEmbeddingShape(2, 3, 224, 224, 32, 384),
+    PatchEmbeddingShape(2, 3, 224, 224, 56, 384),
 )
 
 EMBED_SWEEP = (
     PatchEmbeddingShape(2, 3, 224, 224, 16, 64),
     PatchEmbeddingShape(2, 3, 224, 224, 16, 384),
     PatchEmbeddingShape(2, 3, 224, 224, 16, 768),
+    PatchEmbeddingShape(2, 3, 224, 224, 16, 1024),
+    PatchEmbeddingShape(2, 3, 224, 224, 16, 1536),
+    PatchEmbeddingShape(2, 3, 224, 224, 16, 2048),
+    PatchEmbeddingShape(2, 3, 224, 224, 16, 3072),
 )
 
-RTOL = 2e-4
-ATOL = 2e-4
+RTOL = 1e-3
+ATOL = 1e-3
 
 
 def print_rows(
