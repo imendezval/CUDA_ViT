@@ -129,6 +129,9 @@ def generate_plots(
             output = vit_dir / f"{sweep}_latency.svg"
             plot_vit_scaling(vit_scaling, output, sweep=sweep)
             outputs.append(output)
+            output = vit_dir / f"{sweep}_latency_with_pev1_3part.svg"
+            plot_vit_scaling(vit_scaling, output, sweep=sweep, include_pev1_3part=True)
+            outputs.append(output)
     return tuple(outputs)
 
 

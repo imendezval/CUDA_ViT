@@ -133,9 +133,11 @@ def test_plot_patch_scaling_filters_one_sweep(tmp_path):
 def test_extract_sweep_label_uses_only_changed_dimension():
     patch_shape = "B2_C3_H224_W224_P16_D1536"
     attention_shape = "B2_H12_T192_Dh64"
+    vit_shape = "B2_I256_P16_T256_D192_H3_L2_nocls"
 
     assert extract_sweep_label("batch", patch_shape) == "2"
     assert extract_sweep_label("image", patch_shape) == "224"
+    assert extract_sweep_label("image", vit_shape) == "256"
     assert extract_sweep_label("patch", patch_shape) == "16"
     assert extract_sweep_label("embed", patch_shape) == "1536"
     assert extract_sweep_label("sequence", attention_shape) == "192"
@@ -244,7 +246,9 @@ def test_plot_vit_scaling_writes_svg(tmp_path):
                 "Whole ViT Scaling Benchmark",
                 "sweep,shape,variant,status,median_ms,mean_ms,min_ms,max_ms,max_abs_error,mean_abs_error",
                 "patches,B2_I128_P16_T64_D192_H3_L2_nocls,pytorch_sdpa,ok,1.000000,1.0,1.0,1.0,0,0",
+                "patches,B2_I128_P16_T64_D192_H3_L2_nocls,custom_v1_3_kernel,ok,4.000000,4.0,4.0,4.0,0,0",
                 "patches,B2_I128_P16_T64_D192_H3_L2_nocls,custom_v2_fused_attention,ok,2.000000,2.0,2.0,2.0,0,0",
+                "patches,B2_I128_P16_T64_D192_H3_L2_nocls,custom_v2_flashattention_torch_linear,ok,3.000000,3.0,3.0,3.0,0,0",
             ]
         )
     )
@@ -254,5 +258,29 @@ def test_plot_vit_scaling_writes_svg(tmp_path):
     svg = svg_path.read_text()
     assert "Whole ViT Inference Latency vs Number of Patches" in svg
     assert "Number of Patches" in svg
-    assert "Custom v2 + Fused Attention" in svg
+    assert "PatchEmbedding v2 + FlashAttention + cuBLAS Linear" in svg
+    assert "PatchEmbedding v1 + 3 Part Kernel" not in svg
+    assert "PatchEmbedding v2 + Fused Attention" not in svg
     assert ">64<" in svg
+
+
+def test_plot_vit_scaling_can_include_pev1_3part(tmp_path):
+    csv_path = tmp_path / "vit.csv"
+    svg_path = tmp_path / "vit.svg"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "Whole ViT Scaling Benchmark",
+                "sweep,shape,variant,status,median_ms,mean_ms,min_ms,max_ms,max_abs_error,mean_abs_error",
+                "patches,B2_I128_P16_T64_D192_H3_L2_nocls,pytorch_sdpa,ok,1.000000,1.0,1.0,1.0,0,0",
+                "patches,B2_I128_P16_T64_D192_H3_L2_nocls,custom_v1_3_kernel,ok,4.000000,4.0,4.0,4.0,0,0",
+                "patches,B2_I128_P16_T64_D192_H3_L2_nocls,custom_v2_flashattention_torch_linear,ok,3.000000,3.0,3.0,3.0,0,0",
+            ]
+        )
+    )
+
+    plot_vit_scaling(csv_path, svg_path, sweep="patches", include_pev1_3part=True)
+
+    svg = svg_path.read_text()
+    assert "Whole ViT Inference Latency vs Number of Patches with PEv1 3 Part Kernel" in svg
+    assert "PatchEmbedding v1 + 3 Part Kernel" in svg

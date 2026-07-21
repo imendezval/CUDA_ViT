@@ -36,10 +36,29 @@ DISPLAY_NAMES = {
     "pytorch_conv2d": "PyTorch Conv2d",
     "patchembedding": "PatchEmbedding v1",
     "patchembeddingv2": "PatchEmbedding v2",
-    "custom_v2_3_kernel": "Custom v2 + 3 Part Attention",
-    "custom_v2_fused_attention": "Custom v2 + Fused Attention",
-    "custom_v2_flashattention": "Custom v2 + FlashAttention",
+    "custom_v1_3_kernel": "PatchEmbedding v1 + 3 Part Kernel",
+    "custom_v2_3_kernel": "PatchEmbedding v2 + 3 Part Kernel",
+    "custom_v2_fused_attention": "PatchEmbedding v2 + Fused Attention",
+    "custom_v2_flashattention": "PatchEmbedding v2 + FlashAttention",
+    "custom_v2_3_kernel_torch_linear": "Custom v2 3 Part + cuBLAS Linear",
+    "custom_v2_fused_attention_torch_linear": "Custom v2 Fused + cuBLAS Linear",
+    "custom_v2_flashattention_torch_linear": "PatchEmbedding v2 + FlashAttention + cuBLAS Linear",
 }
+
+VIT_PLOT_VARIANTS = (
+    "pytorch_manual",
+    "pytorch_sdpa",
+    "custom_v2_flashattention",
+    "custom_v2_flashattention_torch_linear",
+)
+
+VIT_PLOT_VARIANTS_WITH_PEV1_3PART = (
+    "pytorch_manual",
+    "pytorch_sdpa",
+    "custom_v1_3_kernel",
+    "custom_v2_flashattention",
+    "custom_v2_flashattention_torch_linear",
+)
 
 METRIC_LABELS = {
     "median_ms": "Latency (ms)",
@@ -123,11 +142,11 @@ def point_line_plot(
     y_label: str,
     series: dict[str, list[tuple[str, float]]],
     *,
-    width: int = 960,
+    width: int = 1280,
     height: int = 720,
 ) -> str:
     margin_left = 110
-    margin_right = 220
+    margin_right = 440
     margin_top = 70
     margin_bottom = 95
     plot_w = width - margin_left - margin_right
@@ -241,7 +260,7 @@ def extract_sweep_label(sweep: str | None, shape: str) -> str:
 
     patterns = {
         "batch": r"B(\d+)",
-        "image": r"H(\d+)",
+        "image": r"(?:I|H)(\d+)",
         "patch": r"P(\d+)",
         "embed": r"D(\d+)",
         "sequence": r"T(\d+)",
@@ -394,15 +413,25 @@ def plot_attention_extra_memory_scaling(path: Path, output: Path) -> None:
     )
 
 
-def plot_vit_scaling(path: Path, output: Path, *, sweep: str) -> None:
+def plot_vit_scaling(
+    path: Path,
+    output: Path,
+    *,
+    sweep: str,
+    include_pev1_3part: bool = False,
+) -> None:
+    variants = VIT_PLOT_VARIANTS_WITH_PEV1_3PART if include_pev1_3part else VIT_PLOT_VARIANTS
+    title = chart_title("Whole ViT Inference", "median_ms", sweep)
+    if include_pev1_3part:
+        title += " with PEv1 3 Part Kernel"
     rows = [
         row
         for row in read_rows(path, VIT_SCALING_HEADER)
-        if row["status"] == "ok" and row["sweep"] == sweep
+        if row["status"] == "ok" and row["sweep"] == sweep and row["variant"] in variants
     ]
     output.write_text(
         point_line_plot(
-            chart_title("Whole ViT Inference", "median_ms", sweep),
+            title,
             x_axis_label(sweep),
             axis_label("median_ms"),
             scaling_series(rows, "median_ms", sweep=sweep),

@@ -87,6 +87,7 @@ def test_generate_plots_removes_stale_speedup_outputs(tmp_path):
     assert attention_dir / "sequence_peak_memory.svg" in outputs
     assert attention_dir / "sequence_extra_peak_memory_vs_sdpa.svg" in outputs
     assert output_root / "vit" / "plots" / "batch_latency.svg" in outputs
+    assert output_root / "vit" / "plots" / "batch_latency_with_pev1_3part.svg" in outputs
     assert not any("speedup" in path.name for path in outputs)
 
 

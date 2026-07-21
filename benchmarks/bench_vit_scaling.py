@@ -18,9 +18,9 @@ from benchmarks.core import BenchmarkConfig, BenchmarkEnv, check_close, format_r
 VARIANTS = (
     Variant("pytorch_manual", "pytorch", "manual", False, False, False),
     Variant("pytorch_sdpa", "pytorch", "sdpa", False, False, False),
-    Variant("custom_v2_3_kernel", "custom_v2", "custom_3_kernel", True, True, True),
-    Variant("custom_v2_fused_attention", "custom_v2", "fused", True, True, True),
+    Variant("custom_v1_3_kernel", "custom_v1", "custom_3_kernel", True, True, True),
     Variant("custom_v2_flashattention", "custom_v2", "flash", True, True, True),
+    Variant("custom_v2_flashattention_torch_linear", "custom_v2", "flash", False, True, False),
 )
 
 BATCH_SWEEP = (
@@ -31,16 +31,16 @@ BATCH_SWEEP = (
 )
 
 IMAGE_SWEEP = (
-    VitShape(2, 3, 64, 16, 192, 3, 4, 2, False),
     VitShape(2, 3, 128, 16, 192, 3, 4, 2, False),
-    VitShape(2, 3, 192, 16, 192, 3, 4, 2, False),
     VitShape(2, 3, 256, 16, 192, 3, 4, 2, False),
+    VitShape(2, 3, 384, 16, 192, 3, 4, 2, False),
+    VitShape(2, 3, 512, 16, 192, 3, 4, 2, False),
 )
 
 PATCHES_SWEEP = (
-    VitShape(2, 3, 128, 32, 192, 3, 4, 2, False),
-    VitShape(2, 3, 128, 16, 192, 3, 4, 2, False),
-    VitShape(2, 3, 128, 8, 192, 3, 4, 2, False),
+    VitShape(2, 3, 256, 32, 192, 3, 4, 2, False),
+    VitShape(2, 3, 256, 16, 192, 3, 4, 2, False),
+    VitShape(2, 3, 256, 8, 192, 3, 4, 2, False),
 )
 
 SWEEPS = (

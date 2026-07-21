@@ -103,9 +103,8 @@ VARIANTS = (
     Variant("pytorch_manual", "pytorch", "manual", False, False, False),
     Variant("pytorch_sdpa", "pytorch", "sdpa", False, False, False),
     Variant("custom_v1_3_kernel", "custom_v1", "custom_3_kernel", True, True, True),
-    Variant("custom_v2_3_kernel", "custom_v2", "custom_3_kernel", True, True, True),
-    Variant("custom_v2_fused_attention", "custom_v2", "fused", True, True, True),
     Variant("custom_v2_flashattention", "custom_v2", "flash", True, True, True),
+    Variant("custom_v2_flashattention_torch_linear", "custom_v2", "flash", False, True, False),
 )
 
 

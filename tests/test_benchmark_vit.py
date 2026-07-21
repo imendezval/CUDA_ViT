@@ -32,12 +32,13 @@ def test_selected_shapes():
 def test_variants_include_whole_vit_comparisons():
     names = {variant.name for variant in VARIANTS}
 
-    assert "pytorch_manual" in names
-    assert "pytorch_sdpa" in names
-    assert "custom_v1_3_kernel" in names
-    assert "custom_v2_3_kernel" in names
-    assert "custom_v2_fused_attention" in names
-    assert "custom_v2_flashattention" in names
+    assert names == {
+        "pytorch_manual",
+        "pytorch_sdpa",
+        "custom_v1_3_kernel",
+        "custom_v2_flashattention",
+        "custom_v2_flashattention_torch_linear",
+    }
 
 
 def test_format_rows_includes_speedups_and_skips():
