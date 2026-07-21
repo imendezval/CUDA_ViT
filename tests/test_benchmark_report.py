@@ -1,4 +1,6 @@
 from benchmarks.report import (
+    PATCH_SCALING_HEADER,
+    read_rows,
     report_attention_memory,
     report_attention_scaling,
     report_patch_scaling,
@@ -51,6 +53,32 @@ def test_report_patch_scaling_summarizes_v1_v2(tmp_path):
             "| image | S | patchembeddingv2 | 0.750000 | 0.5000 | 1.3333 | 140.0 |",
         ]
     )
+
+
+def test_read_rows_skips_loader_noise_after_header(tmp_path):
+    path = tmp_path / "patch.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "Patch Embedding Scaling Benchmark",
+                ",".join(PATCH_SCALING_HEADER),
+                "ninja: no work to do.",
+                "batch,S,pytorch_conv2d,1.000000,1.0000,100.0,1.0000",
+            ]
+        )
+    )
+
+    assert read_rows(path, PATCH_SCALING_HEADER) == [
+        {
+            "sweep": "batch",
+            "shape": "S",
+            "name": "pytorch_conv2d",
+            "median_ms": "1.000000",
+            "speedup_vs_pytorch_conv2d": "1.0000",
+            "logical_bandwidth_gbs": "100.0",
+            "throughput_scale": "1.0000",
+        }
+    ]
 
 
 def test_report_attention_memory_formats_bytes_as_mib(tmp_path):

@@ -30,6 +30,26 @@ ATTENTION_MEMORY_HEADER = (
     "peak_reserved_bytes",
     "status",
 )
+ATTENTION_MEMORY_SCALING_HEADER = (
+    "sweep",
+    "shape",
+    "variant",
+    "peak_allocated_bytes",
+    "peak_reserved_bytes",
+    "status",
+)
+VIT_SCALING_HEADER = (
+    "sweep",
+    "shape",
+    "variant",
+    "status",
+    "median_ms",
+    "mean_ms",
+    "min_ms",
+    "max_ms",
+    "max_abs_error",
+    "mean_abs_error",
+)
 
 
 def read_rows(path: Path, header: tuple[str, ...]) -> list[dict[str, str]]:
@@ -40,7 +60,13 @@ def read_rows(path: Path, header: tuple[str, ...]) -> list[dict[str, str]]:
         raise ValueError(f"missing CSV header in {path}: {','.join(header)}") from exc
 
     reader = csv.DictReader(lines[start:])
-    return [row for row in reader if row]
+    return [
+        row
+        for row in reader
+        if row
+        and row.get(header[0])
+        and all(row.get(column) is not None for column in header)
+    ]
 
 
 def markdown_table(headers: tuple[str, ...], rows: list[tuple[object, ...]]) -> str:
