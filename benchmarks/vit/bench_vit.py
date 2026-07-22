@@ -227,6 +227,8 @@ def vit_forward(
         x = exts["patch_v1"].patchembedding(x, weights.patch)
     elif variant.patch == "custom_v2":
         x = exts["patch_v2"].patchembeddingv2(x, weights.patch)
+    elif variant.patch == "custom_v3":
+        x = exts["patch_v3"].patchembeddingv3(x, weights.patch)
     else:
         raise ValueError(f"unknown patch implementation: {variant.patch}")
 
@@ -384,6 +386,7 @@ def load_extensions() -> dict[str, object]:
     from cuda_vit.ops.mlp_linear_gelu_ext import load_fused_mlp_linear_gelu
     from cuda_vit.ops.patchembedding_ext import load_patchembedding
     from cuda_vit.ops.patchembeddingv2_ext import load_patchembeddingv2
+    from cuda_vit.ops.patchembeddingv3_ext import load_patchembeddingv2 as load_patchembeddingv3
     from cuda_vit.ops.scaled_qk_ext import load_scaled_qk
     from cuda_vit.ops.softmax_ext import load_softmax
 
@@ -396,6 +399,7 @@ def load_extensions() -> dict[str, object]:
         "mlp": load_fused_mlp_linear_gelu(),
         "patch_v1": load_patchembedding(),
         "patch_v2": load_patchembeddingv2(),
+        "patch_v3": load_patchembeddingv3(),
         "scaled_qk": load_scaled_qk(),
         "softmax": load_softmax(),
     }
