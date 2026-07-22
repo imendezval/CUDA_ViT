@@ -42,17 +42,32 @@ VIT_CSV = "\n".join(
     ]
 )
 
+VIT_BREAKDOWN_CSV = "\n".join(
+    [
+        "Whole ViT Component Breakdown Benchmark",
+        "variant,shape,component,median_ms,mean_ms,share_pct",
+        "custom_flash_own_linear,S,patch_embedding,1.000000,1.0,25.00",
+        "custom_flash_own_linear,S,attention,3.000000,3.0,75.00",
+        "custom_flash_own_linear,S,total,4.000000,4.0,100.00",
+        "custom_flash_cublas_linear,S,patch_embedding,1.000000,1.0,50.00",
+        "custom_flash_cublas_linear,S,attention,1.000000,1.0,50.00",
+        "custom_flash_cublas_linear,S,total,2.000000,2.0,100.00",
+    ]
+)
+
 
 def write_inputs(tmp_path):
     patch = tmp_path / "patch.csv"
     attention = tmp_path / "attention.csv"
     memory = tmp_path / "memory.csv"
     vit = tmp_path / "vit.csv"
+    vit_breakdown = tmp_path / "vit_breakdown.csv"
     patch.write_text(PATCH_CSV)
     attention.write_text(ATTENTION_CSV)
     memory.write_text(ATTENTION_MEMORY_CSV)
     vit.write_text(VIT_CSV)
-    return patch, attention, memory, vit
+    vit_breakdown.write_text(VIT_BREAKDOWN_CSV)
+    return patch, attention, memory, vit, vit_breakdown
 
 
 def test_plot_specs_exclude_speedup_by_default():
@@ -66,7 +81,7 @@ def test_plot_specs_exclude_speedup_by_default():
 
 
 def test_generate_plots_removes_stale_speedup_outputs(tmp_path):
-    patch, attention, memory, vit = write_inputs(tmp_path)
+    patch, attention, memory, vit, vit_breakdown = write_inputs(tmp_path)
     output_root = tmp_path / "reports"
     patch_dir = output_root / "patch_embedding" / "plots"
     attention_dir = output_root / "attention" / "plots"
@@ -77,7 +92,15 @@ def test_generate_plots_removes_stale_speedup_outputs(tmp_path):
     stale_throughput = attention_dir / "sequence_throughput_scale.svg"
     stale_throughput.write_text("old")
 
-    outputs = generate_plots(patch, attention, memory, vit, output_root, include_speedup=False)
+    outputs = generate_plots(
+        patch,
+        attention,
+        memory,
+        vit,
+        vit_breakdown,
+        output_root,
+        include_speedup=False,
+    )
 
     assert not stale.exists()
     assert not stale_throughput.exists()
@@ -88,14 +111,26 @@ def test_generate_plots_removes_stale_speedup_outputs(tmp_path):
     assert attention_dir / "sequence_extra_peak_memory_vs_sdpa.svg" in outputs
     assert output_root / "vit" / "plots" / "batch_latency.svg" in outputs
     assert output_root / "vit" / "plots" / "batch_latency_with_pev1_3part.svg" in outputs
+    assert output_root / "vit" / "plots" / "component_breakdown_latency.svg" in outputs
+    assert output_root / "vit" / "plots" / "component_breakdown_share.svg" in outputs
+    assert output_root / "vit" / "plots" / "amdahl_custom_linear.svg" in outputs
+    assert output_root / "vit" / "plots" / "amdahl_cublas_linear.svg" in outputs
     assert not any("speedup" in path.name for path in outputs)
 
 
 def test_generate_plots_can_include_speedup_outputs(tmp_path):
-    patch, attention, memory, vit = write_inputs(tmp_path)
+    patch, attention, memory, vit, vit_breakdown = write_inputs(tmp_path)
     output_dir = tmp_path / "reports"
 
-    outputs = generate_plots(patch, attention, memory, vit, output_dir, include_speedup=True)
+    outputs = generate_plots(
+        patch,
+        attention,
+        memory,
+        vit,
+        vit_breakdown,
+        output_dir,
+        include_speedup=True,
+    )
 
     names = {path.name for path in outputs}
     assert "embed_speedup_vs_conv2d.svg" in names

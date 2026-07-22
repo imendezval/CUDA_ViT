@@ -7,7 +7,10 @@ from benchmarks.reporting.plot import (
     plot_attention_memory_scaling,
     plot_attention_scaling,
     plot_patch_scaling,
+    plot_vit_breakdown,
+    plot_vit_amdahl,
     plot_vit_scaling,
+    series_color,
 )
 
 
@@ -19,8 +22,10 @@ def test_plot_attention_scaling_writes_svg(tmp_path):
             [
                 "Attention Scaling Benchmark",
                 "sweep,shape,name,median_ms,speedup_vs_pytorch_sdpa,throughput_scale",
+                "batch,B1,pytorch_manual,1.250000,0.8000,1.0000",
                 "batch,B1,pytorch_sdpa,1.000000,1.0000,1.0000",
                 "batch,B1,custom_3_kernel,2.000000,0.5000,1.0000",
+                "batch,B2,pytorch_manual,1.750000,0.8571,1.3333",
                 "batch,B2,pytorch_sdpa,1.500000,1.0000,1.3333",
                 "batch,B2,custom_3_kernel,3.000000,0.5000,1.3333",
             ]
@@ -34,6 +39,7 @@ def test_plot_attention_scaling_writes_svg(tmp_path):
     assert "Attention Latency" in svg
     assert "Latency (ms)" in svg
     assert "Custom 3 Part Kernel" in svg
+    assert "PyTorch Manual" not in svg
     assert "batch:B2" in svg
 
 
@@ -47,6 +53,7 @@ def test_plot_patch_scaling_writes_svg(tmp_path):
                 "sweep,shape,name,median_ms,speedup_vs_pytorch_conv2d,logical_bandwidth_gbs,throughput_scale",
                 "image,S,pytorch_conv2d,1.000000,1.0000,100.0,1.0000",
                 "image,S,patchembeddingv2,0.750000,1.3333,140.0,1.1000",
+                "image,S,patchembeddingv3,0.500000,2.0000,200.0,1.2000",
             ]
         )
     )
@@ -57,6 +64,7 @@ def test_plot_patch_scaling_writes_svg(tmp_path):
     assert "Patch Embedding Throughput Scaling" in svg
     assert "Throughput Scaling (x)" in svg
     assert "PatchEmbedding v2" in svg
+    assert "PatchEmbedding v3" in svg
 
 
 def test_plot_patch_scaling_can_show_images_per_second(tmp_path):
@@ -152,6 +160,7 @@ def test_plot_attention_memory_writes_svg(tmp_path):
             [
                 "Attention Memory Benchmark",
                 "variant,shape,peak_allocated_bytes,peak_reserved_bytes,status",
+                "pytorch_manual,S,3145728,4194304,ok",
                 "pytorch_sdpa,S,1048576,2097152,ok",
                 "flashattention,S,skipped,skipped,shape_not_supported",
             ]
@@ -164,6 +173,7 @@ def test_plot_attention_memory_writes_svg(tmp_path):
     assert "Attention Peak Memory by Implementation" in svg
     assert "Peak Allocated Memory (MiB)" in svg
     assert "PyTorch SDPA" in svg
+    assert "PyTorch Manual" not in svg
     assert "flashattention" not in svg
 
 
@@ -175,7 +185,9 @@ def test_plot_attention_memory_scaling_writes_svg(tmp_path):
             [
                 "Attention Memory Scaling Benchmark",
                 "sweep,shape,variant,peak_allocated_bytes,peak_reserved_bytes,status",
+                "sequence,B2_H3_T64_Dh64,pytorch_manual,3145728,4194304,ok",
                 "sequence,B2_H3_T64_Dh64,pytorch_sdpa,1048576,2097152,ok",
+                "sequence,B2_H3_T128_Dh64,pytorch_manual,4194304,8388608,ok",
                 "sequence,B2_H3_T128_Dh64,pytorch_sdpa,2097152,4194304,ok",
                 "sequence,B2_H3_T64_Dh64,flashattention,skipped,skipped,shape_not_supported",
             ]
@@ -188,7 +200,8 @@ def test_plot_attention_memory_scaling_writes_svg(tmp_path):
     assert "Attention Peak Memory vs Sequence Length" in svg
     assert "Peak Allocated Memory (MiB)" in svg
     assert "PyTorch SDPA" in svg
-    assert "FlashAttention" not in svg
+    assert "PyTorch Manual" not in svg
+    assert "FlashAttention" in svg
 
 
 def test_extra_memory_series_vs_sdpa_subtracts_per_shape_baseline():
@@ -211,8 +224,11 @@ def test_extra_memory_series_vs_sdpa_subtracts_per_shape_baseline():
 
     series = extra_memory_series_vs_sdpa(rows)
 
-    assert series["pytorch_sdpa"] == [("512", 0.0)]
-    assert series["pytorch_manual"] == [("512", 2.0)]
+    assert "pytorch_sdpa" not in series
+    assert "pytorch_manual" not in series
+    assert series["custom_3_kernel"] == []
+    assert series["fused_attention"] == []
+    assert series["flashattention"] == []
 
 
 def test_plot_attention_extra_memory_scaling_writes_svg(tmp_path):
@@ -225,6 +241,7 @@ def test_plot_attention_extra_memory_scaling_writes_svg(tmp_path):
                 "sweep,shape,variant,peak_allocated_bytes,peak_reserved_bytes,status",
                 "sequence,B2_H3_T512_Dh64,pytorch_sdpa,1048576,2097152,ok",
                 "sequence,B2_H3_T512_Dh64,pytorch_manual,3145728,4194304,ok",
+                "sequence,B2_H3_T512_Dh64,custom_3_kernel,2097152,3145728,ok",
             ]
         )
     )
@@ -234,7 +251,16 @@ def test_plot_attention_extra_memory_scaling_writes_svg(tmp_path):
     svg = svg_path.read_text()
     assert "Attention Extra Peak Memory vs Sequence Length" in svg
     assert "Extra Peak Memory vs PyTorch SDPA (MiB)" in svg
-    assert "PyTorch Manual" in svg
+    assert "Custom 3 Part Kernel" in svg
+    assert "Fused Attention" in svg
+    assert "FlashAttention" in svg
+    assert "PyTorch Manual" not in svg
+
+
+def test_attention_custom_colors_are_stable_across_plots():
+    assert series_color("custom_3_kernel", 0) == series_color("custom_3_kernel", 3)
+    assert series_color("fused_attention", 1) == series_color("fused_attention", 4)
+    assert series_color("flashattention", 2) == series_color("flashattention", 5)
 
 
 def test_plot_vit_scaling_writes_svg(tmp_path):
@@ -284,3 +310,83 @@ def test_plot_vit_scaling_can_include_pev1_3part(tmp_path):
     svg = svg_path.read_text()
     assert "Whole ViT Inference Latency vs Number of Patches with PEv1 3 Part Kernel" in svg
     assert "PatchEmbedding v1 + 3 Part Kernel" in svg
+
+
+def test_plot_vit_breakdown_writes_stacked_svg(tmp_path):
+    csv_path = tmp_path / "vit_breakdown.csv"
+    svg_path = tmp_path / "vit_breakdown.svg"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "Whole ViT Component Breakdown Benchmark",
+                "variant,shape,component,median_ms,mean_ms,share_pct",
+                "custom_flash_own_linear,S,patch_embedding,1.000000,1.0,25.00",
+                "custom_flash_own_linear,S,token_setup,0.100000,0.1,2.50",
+                "custom_flash_own_linear,S,attention,3.000000,3.0,75.00",
+                "custom_flash_own_linear,S,residual_add,0.010000,0.01,0.25",
+                "custom_flash_own_linear,S,total,4.000000,4.0,100.00",
+                "custom_flash_cublas_linear,S,patch_embedding,1.000000,1.0,50.00",
+                "custom_flash_cublas_linear,S,token_setup,0.100000,0.1,5.00",
+                "custom_flash_cublas_linear,S,attention,1.000000,1.0,50.00",
+                "custom_flash_cublas_linear,S,residual_add,0.010000,0.01,0.50",
+                "custom_flash_cublas_linear,S,total,2.000000,2.0,100.00",
+                "custom_v3_flash_own_linear,S,patch_embedding,1.000000,1.0,25.00",
+                "custom_v3_flash_own_linear,S,attention,3.000000,3.0,75.00",
+                "custom_v3_flash_own_linear,S,total,4.000000,4.0,100.00",
+                "custom_v3_flash_cublas_linear,S,patch_embedding,1.000000,1.0,50.00",
+                "custom_v3_flash_cublas_linear,S,attention,1.000000,1.0,50.00",
+                "custom_v3_flash_cublas_linear,S,residual_add,0.010000,0.01,0.50",
+                "custom_v3_flash_cublas_linear,S,total,2.000000,2.0,100.00",
+                "pytorch_sdpa,S,patch_embedding,1.000000,1.0,50.00",
+                "pytorch_sdpa,S,attention,1.000000,1.0,50.00",
+                "pytorch_sdpa,S,residual_add,0.010000,0.01,0.50",
+                "pytorch_sdpa,S,total,2.000000,2.0,100.00",
+            ]
+        )
+    )
+
+    plot_vit_breakdown(csv_path, svg_path, metric="share_pct")
+
+    svg = svg_path.read_text()
+    assert "Whole ViT Component Breakdown by Runtime Share" in svg
+    assert "Runtime Share (%)" in svg
+    assert "Custom ViT + cuBLAS Linear" in svg
+    assert "PyTorch Baseline" in svg
+    assert "Custom ViT (FlashAttention PE3 + Custom Linear)" not in svg
+    assert "FlashAttention PE3" not in svg
+    assert "PyTorch SDPA)" not in svg
+    assert "Custom FlashAttention + Custom Linear" not in svg
+    assert "Custom FlashAttention + cuBLAS Linear" not in svg
+    assert "Patch Embedding" in svg
+    assert "Token Setup" not in svg
+    assert "Residual Adds" in svg
+
+
+def test_plot_vit_amdahl_writes_speedup_limit_svg(tmp_path):
+    csv_path = tmp_path / "vit_breakdown.csv"
+    svg_path = tmp_path / "amdahl.svg"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "Whole ViT Component Breakdown Benchmark",
+                "variant,shape,component,median_ms,mean_ms,share_pct",
+                "custom_flash_own_linear,S,patch_embedding,1.000000,1.0,25.00",
+                "custom_flash_own_linear,S,token_setup,0.100000,0.1,2.50",
+                "custom_flash_own_linear,S,attention,3.000000,3.0,75.00",
+                "custom_flash_own_linear,S,residual_add,0.010000,0.01,0.25",
+                "custom_flash_own_linear,S,total,4.000000,4.0,100.00",
+            ]
+        )
+    )
+
+    plot_vit_amdahl(csv_path, svg_path, variant="custom_flash_own_linear")
+
+    svg = svg_path.read_text()
+    assert "Amdahl Speedup Limits for Custom ViT + Custom Linear" in svg
+    assert "Whole-ViT Speedup Limit (x)" in svg
+    assert "10x Component Speedup" in svg
+    assert "Infinite Component Speedup" in svg
+    assert "Attention" in svg
+    assert "Token Setup" not in svg
+    assert "Residual Adds" not in svg
+    assert ">1<" in svg

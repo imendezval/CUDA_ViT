@@ -32,7 +32,7 @@ def test_report_attention_scaling_skips_metadata(tmp_path):
     )
 
 
-def test_report_patch_scaling_summarizes_v1_v2(tmp_path):
+def test_report_patch_scaling_summarizes_v1_v2_v3(tmp_path):
     path = tmp_path / "patch.csv"
     path.write_text(
         "\n".join(
@@ -42,15 +42,16 @@ def test_report_patch_scaling_summarizes_v1_v2(tmp_path):
                 "image,S,pytorch_conv2d,1.000000,1.0000,100.0,1.0000",
                 "image,S,patchembedding,2.000000,0.5000,50.0,1.0000",
                 "image,S,patchembeddingv2,0.750000,1.3333,140.0,1.0000",
+                "image,S,patchembeddingv3,0.500000,2.0000,200.0,1.0000",
             ]
         )
     )
 
     assert report_patch_scaling(path) == "\n".join(
         [
-            "| Sweep | Shape | Fastest | Fastest ms | v1 vs conv2d | v2 vs conv2d | v2 GB/s |",
-            "| --- | --- | --- | --- | --- | --- | --- |",
-            "| image | S | patchembeddingv2 | 0.750000 | 0.5000 | 1.3333 | 140.0 |",
+            "| Sweep | Shape | Fastest | Fastest ms | v1 vs conv2d | v2 vs conv2d | v3 vs conv2d | v3 GB/s |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| image | S | patchembeddingv3 | 0.500000 | 0.5000 | 1.3333 | 2.0000 | 200.0 |",
         ]
     )
 
