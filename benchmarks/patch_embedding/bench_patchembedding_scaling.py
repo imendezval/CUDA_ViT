@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Iterable
 
 import torch
@@ -24,6 +25,7 @@ from benchmarks.common.core import (
 )
 from cuda_vit.ops.patchembedding_ext import load_patchembedding
 from cuda_vit.ops.patchembeddingv2_ext import load_patchembeddingv2
+from cuda_vit.ops.patchembeddingv3_ext import load_patchembeddingv2 as load_patchembeddingv3
 
 
 BATCH_SWEEP = (
@@ -95,6 +97,7 @@ def print_rows(
 def benchmark_shape(
     ext_v1: object,
     ext_v2: object,
+    ext_v3: object,
     sweep: str,
     shape: PatchEmbeddingShape,
     *,
@@ -119,7 +122,7 @@ def benchmark_shape(
         atol=ATOL,
     )
 
-    timings = (
+    timings = [
         time_cuda(
             "pytorch_conv2d",
             lambda: pytorch_patchembedding(x, weight, shape),
@@ -141,8 +144,27 @@ def benchmark_shape(
             iterations=iterations,
             repeats=repeats,
         ),
-    )
-    return timings
+    ]
+    try:
+        check_close(
+            "patchembeddingv3",
+            ext_v3.patchembeddingv3(x, weight),
+            expected,
+            rtol=RTOL,
+            atol=ATOL,
+        )
+        timings.append(
+            time_cuda(
+                "patchembeddingv3",
+                lambda: ext_v3.patchembeddingv3(x, weight),
+                warmup=warmup,
+                iterations=iterations,
+                repeats=repeats,
+            )
+        )
+    except RuntimeError as exc:
+        print(f"skipping patchembeddingv3 for {shape.label}: {exc}", file=sys.stderr)
+    return tuple(timings)
 
 
 def parse_args() -> argparse.Namespace:
@@ -177,6 +199,7 @@ def main() -> None:
 
     ext_v1 = load_patchembedding()
     ext_v2 = load_patchembeddingv2()
+    ext_v3 = load_patchembeddingv3()
 
     sweeps = (
         ("batch", BATCH_SWEEP),
@@ -191,6 +214,7 @@ def main() -> None:
             timings = benchmark_shape(
                 ext_v1,
                 ext_v2,
+                ext_v3,
                 sweep,
                 shape,
                 warmup=args.warmup,

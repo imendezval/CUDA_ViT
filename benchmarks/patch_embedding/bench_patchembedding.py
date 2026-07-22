@@ -19,6 +19,7 @@ from benchmarks.common.core import (
 )
 from cuda_vit.ops.patchembedding_ext import load_patchembedding
 from cuda_vit.ops.patchembeddingv2_ext import load_patchembeddingv2
+from cuda_vit.ops.patchembeddingv3_ext import load_patchembeddingv2 as load_patchembeddingv3
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,7 @@ def make_inputs(shape: PatchEmbeddingShape) -> tuple[torch.Tensor, torch.Tensor]
 def benchmark_shape(
     ext_v1: object,
     ext_v2: object,
+    ext_v3: object,
     shape: PatchEmbeddingShape,
     *,
     warmup: int,
@@ -121,6 +123,13 @@ def benchmark_shape(
         check_close(
             "patchembeddingv2",
             ext_v2.patchembeddingv2(x, weight),
+            expected,
+            rtol=1e-4,
+            atol=1e-4,
+        ),
+        check_close(
+            "patchembeddingv3",
+            ext_v3.patchembeddingv3(x, weight),
             expected,
             rtol=1e-4,
             atol=1e-4,
@@ -149,6 +158,13 @@ def benchmark_shape(
             iterations=iterations,
             repeats=repeats,
         ),
+        time_cuda(
+            "patchembeddingv3",
+            lambda: ext_v3.patchembeddingv3(x, weight),
+            warmup=warmup,
+            iterations=iterations,
+            repeats=repeats,
+        ),
     )
 
     bytes_per_call = logical_bytes(shape)
@@ -162,7 +178,9 @@ def benchmark_shape(
         print(f"{timing.name}: logical_bandwidth={bandwidth:.1f} GB/s")
     print(format_comparison(timings[0], timings[1]))
     print(format_comparison(timings[0], timings[2]))
+    print(format_comparison(timings[0], timings[3]))
     print(format_comparison(timings[1], timings[2]))
+    print(format_comparison(timings[2], timings[3]))
 
 
 def parse_args() -> argparse.Namespace:
@@ -193,11 +211,13 @@ def main() -> None:
 
     ext_v1 = load_patchembedding()
     ext_v2 = load_patchembeddingv2()
+    ext_v3 = load_patchembeddingv3()
 
     for shape in SHAPES:
         benchmark_shape(
             ext_v1,
             ext_v2,
+            ext_v3,
             shape,
             warmup=args.warmup,
             iterations=args.iterations,
