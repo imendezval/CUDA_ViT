@@ -50,6 +50,14 @@ VIT_SCALING_HEADER = (
     "max_abs_error",
     "mean_abs_error",
 )
+VIT_BREAKDOWN_HEADER = (
+    "variant",
+    "shape",
+    "component",
+    "median_ms",
+    "mean_ms",
+    "share_pct",
+)
 
 
 def read_rows(path: Path, header: tuple[str, ...]) -> list[dict[str, str]]:
@@ -134,6 +142,7 @@ def report_patch_scaling(path: Path) -> str:
         fastest = min(group, key=lambda row: float(row["median_ms"]))
         v1 = next((row for row in group if row["name"] == "patchembedding"), None)
         v2 = next((row for row in group if row["name"] == "patchembeddingv2"), None)
+        v3 = next((row for row in group if row["name"] == "patchembeddingv3"), None)
         summary.append(
             (
                 sweep,
@@ -142,7 +151,8 @@ def report_patch_scaling(path: Path) -> str:
                 fmt_float(fastest["median_ms"], 6),
                 fmt_float(v1["speedup_vs_pytorch_conv2d"]) if v1 else "",
                 fmt_float(v2["speedup_vs_pytorch_conv2d"]) if v2 else "",
-                fmt_float(v2["logical_bandwidth_gbs"], 1) if v2 else "",
+                fmt_float(v3["speedup_vs_pytorch_conv2d"]) if v3 else "",
+                fmt_float(v3["logical_bandwidth_gbs"], 1) if v3 else "",
             )
         )
 
@@ -154,7 +164,8 @@ def report_patch_scaling(path: Path) -> str:
             "Fastest ms",
             "v1 vs conv2d",
             "v2 vs conv2d",
-            "v2 GB/s",
+            "v3 vs conv2d",
+            "v3 GB/s",
         ),
         summary,
     )

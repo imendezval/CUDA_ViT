@@ -5,11 +5,13 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import median
 
+from benchmarks.common.core import amdahl_speedup
 from benchmarks.reporting.plot import display_name
 from benchmarks.common.report import (
     ATTENTION_MEMORY_SCALING_HEADER,
     ATTENTION_SCALING_HEADER,
     PATCH_SCALING_HEADER,
+    VIT_BREAKDOWN_HEADER,
     markdown_table,
     read_rows,
     report_attention_scaling,
@@ -18,7 +20,7 @@ from benchmarks.common.report import (
 
 
 ATTENTION_PRESENTATION_SWEEPS = {"batch", "sequence", "heads"}
-PATCH_VARIANTS = ("pytorch_conv2d", "patchembedding", "patchembeddingv2")
+PATCH_VARIANTS = ("pytorch_conv2d", "patchembedding", "patchembeddingv2", "patchembeddingv3")
 ATTENTION_VARIANTS = (
     "pytorch_manual",
     "pytorch_sdpa",
@@ -26,6 +28,18 @@ ATTENTION_VARIANTS = (
     "fused_attention",
     "flashattention",
 )
+VIT_BREAKDOWN_COMPONENTS = (
+    "patch_embedding",
+    "layernorm",
+    "qkv_projection",
+    "attention",
+    "output_projection",
+    "mlp",
+    "residual_add",
+    "total",
+)
+AMDAHL_LOCAL_SPEEDUPS = (2.0, 5.0, 10.0, float("inf"))
+VIT_AMDAHL_COMPONENTS = set(VIT_BREAKDOWN_COMPONENTS) - {"residual_add", "total"}
 PATCH_REPRESENTATIVE_SHAPE = "B2_C3_H224_W224_P16_D384"
 ATTENTION_REPRESENTATIVE_SHAPE = "B2_H3_T192_Dh64"
 PATCH_LARGEST = {
@@ -69,6 +83,10 @@ def fmt_ratio(value: float) -> str:
     return f"{value:.3f}x"
 
 
+def fmt_local_speedup(value: float) -> str:
+    return "inf" if value == float("inf") else f"{value:g}x"
+
+
 def summarize_vs_baseline(
     grouped: dict[tuple[str, str], dict[str, float]],
     baseline: str,
@@ -81,6 +99,9 @@ def summarize_vs_baseline(
             if baseline not in timings or variant not in timings:
                 continue
             ratios.append(timings[baseline] / timings[variant])
+        if not ratios:
+            summary.append((display_name(variant), "0/0", "", "", ""))
+            continue
         wins = sum(ratio > 1.0 for ratio in ratios)
         total = len(ratios)
         summary.append(
@@ -109,8 +130,89 @@ def patch_performance_summary(path: Path) -> str:
         summarize_vs_baseline(
             grouped,
             "pytorch_conv2d",
-            ("patchembedding", "patchembeddingv2"),
+            ("patchembedding", "patchembeddingv2", "patchembeddingv3"),
         ),
+    )
+
+
+def patch_custom_evolution_summary(path: Path) -> str:
+    rows = read_rows(path, PATCH_SCALING_HEADER)
+    grouped = grouped_timings(rows)
+    comparisons = (
+        ("PatchEmbedding v2 vs v1", "patchembedding", "patchembeddingv2"),
+        ("PatchEmbedding v3 vs v2", "patchembeddingv2", "patchembeddingv3"),
+        ("PatchEmbedding v3 vs v1", "patchembedding", "patchembeddingv3"),
+    )
+    table_rows = []
+    for label, baseline, candidate in comparisons:
+        ratios = [
+            timings[baseline] / timings[candidate]
+            for timings in grouped.values()
+            if baseline in timings and candidate in timings
+        ]
+        if not ratios:
+            table_rows.append((label, "0/0", "", "", ""))
+            continue
+        table_rows.append(
+            (
+                label,
+                f"{sum(ratio > 1.0 for ratio in ratios)}/{len(ratios)}",
+                fmt_ratio(median(ratios)),
+                fmt_ratio(max(ratios)),
+                fmt_ratio(min(ratios)),
+            )
+        )
+    return markdown_table(
+        (
+            "Comparison",
+            "Wins",
+            "Median Speedup",
+            "Best Speedup",
+            "Worst Speedup",
+        ),
+        table_rows,
+    )
+
+
+def attention_custom_evolution_summary(path: Path) -> str:
+    rows = filter_sweeps(
+        read_rows(path, ATTENTION_SCALING_HEADER),
+        ATTENTION_PRESENTATION_SWEEPS,
+    )
+    grouped = grouped_timings(rows)
+    comparisons = (
+        ("Fused Attention vs Custom 3 Part Kernel", "custom_3_kernel", "fused_attention"),
+        ("FlashAttention vs Fused Attention", "fused_attention", "flashattention"),
+        ("FlashAttention vs Custom 3 Part Kernel", "custom_3_kernel", "flashattention"),
+    )
+    table_rows = []
+    for label, baseline, candidate in comparisons:
+        ratios = [
+            timings[baseline] / timings[candidate]
+            for timings in grouped.values()
+            if baseline in timings and candidate in timings
+        ]
+        if not ratios:
+            table_rows.append((label, "0/0", "", "", ""))
+            continue
+        table_rows.append(
+            (
+                label,
+                f"{sum(ratio > 1.0 for ratio in ratios)}/{len(ratios)}",
+                fmt_ratio(median(ratios)),
+                fmt_ratio(max(ratios)),
+                fmt_ratio(min(ratios)),
+            )
+        )
+    return markdown_table(
+        (
+            "Comparison",
+            "Wins",
+            "Median Speedup",
+            "Best Speedup",
+            "Worst Speedup",
+        ),
+        table_rows,
     )
 
 
@@ -165,8 +267,13 @@ def representative_patch_latency(path: Path) -> str:
     lookup = row_lookup(rows)
     table_rows = []
     for variant in PATCH_VARIANTS:
-        row = lookup[("embed", PATCH_REPRESENTATIVE_SHAPE, variant)]
-        table_rows.append((display_name(variant), fmt_ms(float(row["median_ms"]))))
+        row = lookup.get(("embed", PATCH_REPRESENTATIVE_SHAPE, variant))
+        table_rows.append(
+            (
+                display_name(variant),
+                fmt_ms(float(row["median_ms"])) if row else "",
+            )
+        )
     return markdown_table(("Variant", "Latency (ms)"), table_rows)
 
 
@@ -192,7 +299,8 @@ def largest_patch_latency(path: Path) -> str:
     for sweep, shape in PATCH_LARGEST.items():
         values = [sweep, shape]
         for variant in PATCH_VARIANTS:
-            values.append(fmt_ms(float(lookup[(sweep, shape, variant)]["median_ms"])))
+            row = lookup.get((sweep, shape, variant))
+            values.append(fmt_ms(float(row["median_ms"])) if row else "")
         table_rows.append(tuple(values))
     return markdown_table(
         (
@@ -201,6 +309,7 @@ def largest_patch_latency(path: Path) -> str:
             "PyTorch Conv2d (ms)",
             "PatchEmbedding v1 (ms)",
             "PatchEmbedding v2 (ms)",
+            "PatchEmbedding v3 (ms)",
         ),
         table_rows,
     )
@@ -253,6 +362,21 @@ def fmt_mib(bytes_text: str) -> str:
     return f"{int(bytes_text) / (1024 * 1024):.2f}"
 
 
+def component_label(component: str) -> str:
+    labels = {
+        "patch_embedding": "Patch Embedding",
+        "token_setup": "Token Setup",
+        "layernorm": "LayerNorm",
+        "qkv_projection": "QKV Projection",
+        "attention": "Attention",
+        "output_projection": "Output Projection",
+        "mlp": "MLP",
+        "residual_add": "Residual Adds",
+        "total": "Total",
+    }
+    return labels.get(component, component)
+
+
 def largest_patch_throughput(path: Path) -> str:
     rows = read_rows(path, PATCH_SCALING_HEADER)
     lookup = row_lookup(rows)
@@ -260,7 +384,8 @@ def largest_patch_throughput(path: Path) -> str:
     for sweep, shape in PATCH_LARGEST.items():
         values = [sweep, shape]
         for variant in PATCH_VARIANTS:
-            values.append(fmt_rate(images_per_s(lookup[(sweep, shape, variant)])))
+            row = lookup.get((sweep, shape, variant))
+            values.append(fmt_rate(images_per_s(row)) if row else "")
         table_rows.append(tuple(values))
     return markdown_table(
         (
@@ -269,6 +394,7 @@ def largest_patch_throughput(path: Path) -> str:
             "PyTorch Conv2d (images/s)",
             "PatchEmbedding v1 (images/s)",
             "PatchEmbedding v2 (images/s)",
+            "PatchEmbedding v3 (images/s)",
         ),
         table_rows,
     )
@@ -334,6 +460,71 @@ def attention_memory_scaling_table(path: Path) -> str:
     )
 
 
+def vit_component_breakdown_table(path: Path) -> str:
+    rows = read_rows(path, VIT_BREAKDOWN_HEADER)
+    grouped = defaultdict(dict)
+    for row in rows:
+        grouped[row["component"]][row["variant"]] = row
+
+    variants = []
+    for row in rows:
+        if row["variant"] not in variants:
+            variants.append(row["variant"])
+
+    table_rows = []
+    for component in VIT_BREAKDOWN_COMPONENTS:
+        values = [component_label(component)]
+        for variant in variants:
+            row = grouped.get(component, {}).get(variant)
+            if row is None:
+                values.append("")
+                values.append("")
+            else:
+                values.append(fmt_ms(float(row["median_ms"])))
+                values.append(f'{float(row["share_pct"]):.2f}')
+        table_rows.append(tuple(values))
+
+    headers = ["Component"]
+    for variant in variants:
+        headers.append(f"{display_name(variant)} (ms)")
+        headers.append(f"{display_name(variant)} (%)")
+    return markdown_table(tuple(headers), table_rows)
+
+
+def amdahl_component_limit_table(path: Path) -> str:
+    rows = read_rows(path, VIT_BREAKDOWN_HEADER)
+    table_rows = []
+    for row in rows:
+        if row["component"] not in VIT_AMDAHL_COMPONENTS:
+            continue
+        runtime_fraction = float(row["share_pct"]) / 100.0
+        values = [
+            display_name(row["variant"]),
+            component_label(row["component"]),
+            f'{float(row["share_pct"]):.2f}',
+        ]
+        for local_speedup in AMDAHL_LOCAL_SPEEDUPS:
+            if local_speedup == float("inf"):
+                speedup = 1.0 / (1.0 - runtime_fraction) if runtime_fraction < 1.0 else float("inf")
+            else:
+                speedup = amdahl_speedup(runtime_fraction, local_speedup)
+            values.append(fmt_ratio(speedup))
+        table_rows.append(tuple(values))
+
+    return markdown_table(
+        (
+            "Variant",
+            "Optimized Component",
+            "Runtime Share (%)",
+            "Whole Speedup if 2x",
+            "Whole Speedup if 5x",
+            "Whole Speedup if 10x",
+            "Whole Speedup if inf",
+        ),
+        table_rows,
+    )
+
+
 def takeaway_summary(patch_scaling: Path, attention_scaling: Path) -> str:
     patch_rows = read_rows(patch_scaling, PATCH_SCALING_HEADER)
     patch_grouped = grouped_timings(patch_rows)
@@ -352,6 +543,16 @@ def takeaway_summary(patch_scaling: Path, attention_scaling: Path) -> str:
         timings["pytorch_conv2d"] / timings["patchembeddingv2"]
         for timings in patch_grouped.values()
         if "pytorch_conv2d" in timings and "patchembeddingv2" in timings
+    ]
+    v3_vs_v2 = [
+        timings["patchembeddingv2"] / timings["patchembeddingv3"]
+        for timings in patch_grouped.values()
+        if "patchembeddingv2" in timings and "patchembeddingv3" in timings
+    ]
+    v3_vs_conv = [
+        timings["pytorch_conv2d"] / timings["patchembeddingv3"]
+        for timings in patch_grouped.values()
+        if "pytorch_conv2d" in timings and "patchembeddingv3" in timings
     ]
     fused_vs_custom = [
         timings["custom_3_kernel"] / timings["fused_attention"]
@@ -379,6 +580,20 @@ def takeaway_summary(patch_scaling: Path, attention_scaling: Path) -> str:
                 "Does PatchEmbedding v2 beat PyTorch Conv2d?",
                 f"Rarely, {sum(ratio > 1.0 for ratio in v2_vs_conv)}/{len(v2_vs_conv)} shapes.",
             ),
+            *(
+                [
+                    (
+                        "Does PatchEmbedding v3 improve over v2?",
+                        f"Median {fmt_ratio(median(v3_vs_v2))} vs v2.",
+                    ),
+                    (
+                        "Does PatchEmbedding v3 beat PyTorch Conv2d?",
+                        f"{sum(ratio > 1.0 for ratio in v3_vs_conv)}/{len(v3_vs_conv)} shapes.",
+                    ),
+                ]
+                if v3_vs_v2 and v3_vs_conv
+                else []
+            ),
             (
                 "Does fused attention beat the 3-part kernel?",
                 f"Yes, median {fmt_ratio(median(fused_vs_custom))} faster.",
@@ -400,34 +615,42 @@ def generate_tables(
     attention_scaling: Path,
     attention_memory_scaling: Path | None,
     output_root: Path,
+    vit_breakdown: Path | None = None,
 ) -> tuple[Path, ...]:
     patch_dir = output_root / "patch_embedding" / "tables"
     attention_dir = output_root / "attention" / "tables"
+    vit_dir = output_root / "vit" / "tables"
     patch_dir.mkdir(parents=True, exist_ok=True)
     attention_dir.mkdir(parents=True, exist_ok=True)
+    vit_dir.mkdir(parents=True, exist_ok=True)
 
-    outputs = (
+    outputs = [
         patch_dir / "scaling_summary.md",
         patch_dir / "performance_summary.md",
+        patch_dir / "custom_evolution_summary.md",
         patch_dir / "representative_latency.md",
         patch_dir / "largest_latency.md",
         patch_dir / "largest_throughput.md",
         attention_dir / "scaling_summary.md",
         attention_dir / "performance_summary.md",
+        attention_dir / "custom_evolution_summary.md",
         attention_dir / "representative_latency.md",
         attention_dir / "largest_latency.md",
         attention_dir / "largest_throughput.md",
         attention_dir / "memory_scaling.md",
+        vit_dir / "component_breakdown.md",
+        vit_dir / "amdahl_limits.md",
         output_root / "takeaways.md",
-    )
+    ]
     def write_table(path: Path, text: str) -> None:
         path.write_text(text + "\n")
 
     write_table(outputs[0], report_patch_scaling(patch_scaling))
     write_table(outputs[1], patch_performance_summary(patch_scaling))
-    write_table(outputs[2], representative_patch_latency(patch_scaling))
-    write_table(outputs[3], largest_patch_latency(patch_scaling))
-    write_table(outputs[4], largest_patch_throughput(patch_scaling))
+    write_table(outputs[2], patch_custom_evolution_summary(patch_scaling))
+    write_table(outputs[3], representative_patch_latency(patch_scaling))
+    write_table(outputs[4], largest_patch_latency(patch_scaling))
+    write_table(outputs[5], largest_patch_throughput(patch_scaling))
     attention_rows = filter_sweeps(
         read_rows(attention_scaling, ATTENTION_SCALING_HEADER),
         ATTENTION_PRESENTATION_SWEEPS,
@@ -444,18 +667,25 @@ def generate_tables(
             ]
         )
     )
-    write_table(outputs[5], report_attention_scaling(filtered_attention))
-    write_table(outputs[6], attention_performance_summary(attention_scaling))
-    write_table(outputs[7], representative_attention_latency(attention_scaling))
-    write_table(outputs[8], largest_attention_latency(attention_scaling))
-    write_table(outputs[9], largest_attention_throughput(attention_scaling))
+    write_table(outputs[6], report_attention_scaling(filtered_attention))
+    write_table(outputs[7], attention_performance_summary(attention_scaling))
+    write_table(outputs[8], attention_custom_evolution_summary(attention_scaling))
+    write_table(outputs[9], representative_attention_latency(attention_scaling))
+    write_table(outputs[10], largest_attention_latency(attention_scaling))
+    write_table(outputs[11], largest_attention_throughput(attention_scaling))
     if attention_memory_scaling is not None and attention_memory_scaling.exists():
-        write_table(outputs[10], attention_memory_scaling_table(attention_memory_scaling))
+        write_table(outputs[12], attention_memory_scaling_table(attention_memory_scaling))
     else:
-        write_table(outputs[10], "No attention memory scaling data available.")
-    write_table(outputs[11], takeaway_summary(patch_scaling, attention_scaling))
+        write_table(outputs[12], "No attention memory scaling data available.")
+    if vit_breakdown is not None and vit_breakdown.exists():
+        write_table(outputs[13], vit_component_breakdown_table(vit_breakdown))
+        write_table(outputs[14], amdahl_component_limit_table(vit_breakdown))
+    else:
+        write_table(outputs[13], "No whole-ViT component breakdown data available.")
+        write_table(outputs[14], "No whole-ViT component breakdown data available.")
+    write_table(outputs[15], takeaway_summary(patch_scaling, attention_scaling))
     filtered_attention.unlink()
-    return outputs
+    return tuple(outputs)
 
 
 def parse_args() -> argparse.Namespace:
@@ -475,6 +705,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("profiles/attention/memory_scaling.csv"),
     )
+    parser.add_argument(
+        "--vit-breakdown",
+        type=Path,
+        default=Path("profiles/vit/breakdown.csv"),
+    )
     parser.add_argument("--output-root", type=Path, default=Path("reports"))
     return parser.parse_args()
 
@@ -486,6 +721,7 @@ def main() -> None:
         args.attention_scaling,
         args.attention_memory_scaling,
         args.output_root,
+        args.vit_breakdown,
     )
     for output in outputs:
         print(output)

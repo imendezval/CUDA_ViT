@@ -13,6 +13,7 @@ from benchmarks.common.report import (
     ATTENTION_SCALING_HEADER,
     PATCH_SCALING_HEADER,
     VIT_SCALING_HEADER,
+    VIT_BREAKDOWN_HEADER,
     read_rows,
 )
 
@@ -26,6 +27,13 @@ COLORS = (
     "#0891b2",
 )
 
+SERIES_COLORS = {
+    "pytorch_sdpa": "#2563eb",
+    "custom_3_kernel": "#16a34a",
+    "fused_attention": "#9333ea",
+    "flashattention": "#ea580c",
+}
+
 
 DISPLAY_NAMES = {
     "flashattention": "FlashAttention",
@@ -36,6 +44,7 @@ DISPLAY_NAMES = {
     "pytorch_conv2d": "PyTorch Conv2d",
     "patchembedding": "PatchEmbedding v1",
     "patchembeddingv2": "PatchEmbedding v2",
+    "patchembeddingv3": "PatchEmbedding v3",
     "custom_v1_3_kernel": "PatchEmbedding v1 + 3 Part Kernel",
     "custom_v2_3_kernel": "PatchEmbedding v2 + 3 Part Kernel",
     "custom_v2_fused_attention": "PatchEmbedding v2 + Fused Attention",
@@ -43,7 +52,61 @@ DISPLAY_NAMES = {
     "custom_v2_3_kernel_torch_linear": "Custom v2 3 Part + cuBLAS Linear",
     "custom_v2_fused_attention_torch_linear": "Custom v2 Fused + cuBLAS Linear",
     "custom_v2_flashattention_torch_linear": "PatchEmbedding v2 + FlashAttention + cuBLAS Linear",
+    "custom_flash_own_linear": "Custom FlashAttention + Custom Linear",
+    "custom_flash_cublas_linear": "Custom FlashAttention + cuBLAS Linear",
+    "custom_v3_flash_own_linear": "PatchEmbedding v3 + FlashAttention + Custom Linear",
+    "custom_v3_flash_cublas_linear": "PatchEmbedding v3 + FlashAttention + cuBLAS Linear",
 }
+
+AMDAHL_DISPLAY_NAMES = {
+    "custom_flash_own_linear": "Custom ViT + Custom Linear",
+    "custom_flash_cublas_linear": "Custom ViT + cuBLAS Linear",
+}
+
+VIT_BREAKDOWN_PLOT_DISPLAY_NAMES = {
+    "custom_v3_flash_cublas_linear": "Custom ViT + cuBLAS Linear",
+    "pytorch_sdpa": "PyTorch Baseline",
+}
+
+COMPONENT_NAMES = {
+    "patch_embedding": "Patch Embedding",
+    "layernorm": "LayerNorm",
+    "qkv_projection": "QKV Projection",
+    "attention": "Attention",
+    "output_projection": "Output Projection",
+    "mlp": "MLP",
+    "residual_add": "Residual Adds",
+    "total": "Total",
+}
+
+AMDAHL_LOCAL_SPEEDUPS = (2.0, 5.0, 10.0, float("inf"))
+VIT_PRESENTATION_COMPONENTS = {
+    "patch_embedding",
+    "layernorm",
+    "qkv_projection",
+    "attention",
+    "output_projection",
+    "mlp",
+    "residual_add",
+}
+VIT_AMDAHL_COMPONENTS = VIT_PRESENTATION_COMPONENTS - {"residual_add"}
+VIT_BREAKDOWN_PLOT_VARIANTS = (
+    "custom_v3_flash_cublas_linear",
+    "pytorch_sdpa",
+)
+
+ATTENTION_PLOT_VARIANTS = (
+    "pytorch_sdpa",
+    "custom_3_kernel",
+    "fused_attention",
+    "flashattention",
+)
+
+ATTENTION_CUSTOM_PLOT_VARIANTS = (
+    "custom_3_kernel",
+    "fused_attention",
+    "flashattention",
+)
 
 VIT_PLOT_VARIANTS = (
     "pytorch_manual",
@@ -98,6 +161,44 @@ def display_name(name: str) -> str:
     return DISPLAY_NAMES.get(name, name)
 
 
+def amdahl_display_name(name: str) -> str:
+    return AMDAHL_DISPLAY_NAMES.get(name, display_name(name))
+
+
+def vit_breakdown_display_name(name: str) -> str:
+    return VIT_BREAKDOWN_PLOT_DISPLAY_NAMES.get(name, display_name(name))
+
+
+def series_color(name: str, index: int) -> str:
+    return SERIES_COLORS.get(name, COLORS[index % len(COLORS)])
+
+
+def ordered_series(
+    series: dict[str, list[tuple[str, float]]],
+    order: tuple[str, ...],
+) -> dict[str, list[tuple[str, float]]]:
+    ordered = {name: series.get(name, []) for name in order}
+    for name, values in series.items():
+        if name not in ordered:
+            ordered[name] = values
+    return ordered
+
+
+def component_name(name: str) -> str:
+    return COMPONENT_NAMES.get(name, name)
+
+
+def local_speedup_name(value: float) -> str:
+    return "Infinite Component Speedup" if value == float("inf") else f"{value:g}x Component Speedup"
+
+
+def amdahl_speedup_from_share(share_pct: float, local_speedup: float) -> float:
+    fraction = share_pct / 100.0
+    if local_speedup == float("inf"):
+        return 1.0 / (1.0 - fraction) if fraction < 1.0 else float("inf")
+    return 1.0 / ((1.0 - fraction) + fraction / local_speedup)
+
+
 def axis_label(metric: str) -> str:
     return METRIC_LABELS.get(metric, metric)
 
@@ -144,6 +245,7 @@ def point_line_plot(
     *,
     width: int = 1280,
     height: int = 720,
+    y_min: float = 0.0,
 ) -> str:
     margin_left = 110
     margin_right = 440
@@ -161,6 +263,8 @@ def point_line_plot(
     y_values = [value for values in series.values() for _, value in values]
     y_max = max(y_values) if y_values else 1.0
     y_max = nice_axis_max(y_max)
+    if y_max <= y_min:
+        y_max = y_min + 1.0
 
     def x_pos(label: str) -> float:
         if len(labels) == 1:
@@ -168,7 +272,7 @@ def point_line_plot(
         return margin_left + labels.index(label) * plot_w / (len(labels) - 1)
 
     def y_pos(value: float) -> float:
-        return margin_top + plot_h - (value / y_max) * plot_h
+        return margin_top + plot_h - ((value - y_min) / (y_max - y_min)) * plot_h
 
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
@@ -181,7 +285,7 @@ def point_line_plot(
     ]
 
     for idx in range(5):
-        value = y_max * idx / 4
+        value = y_min + (y_max - y_min) * idx / 4
         y = y_pos(value)
         out.append(f'<line x1="{margin_left}" y1="{y:.2f}" x2="{margin_left + plot_w}" y2="{y:.2f}" stroke="#e5e7eb"/>')
         out.append(f'<text x="{margin_left - 12}" y="{y + 5:.2f}" text-anchor="end" font-family="sans-serif" font-size="13">{tick_text(value)}</text>')
@@ -191,11 +295,12 @@ def point_line_plot(
         out.append(f'<text x="{x:.2f}" y="{margin_top + plot_h + 30}" text-anchor="middle" font-family="sans-serif" font-size="14">{escape(label)}</text>')
 
     for idx, (name, values) in enumerate(series.items()):
-        color = COLORS[idx % len(COLORS)]
-        points = " ".join(f"{x_pos(label):.2f},{y_pos(value):.2f}" for label, value in values)
-        out.append(f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="2.5"/>')
-        for label, value in values:
-            out.append(f'<circle cx="{x_pos(label):.2f}" cy="{y_pos(value):.2f}" r="4" fill="{color}"/>')
+        color = series_color(name, idx)
+        if values:
+            points = " ".join(f"{x_pos(label):.2f},{y_pos(value):.2f}" for label, value in values)
+            out.append(f'<polyline points="{points}" fill="none" stroke="{color}" stroke-width="2.5"/>')
+            for label, value in values:
+                out.append(f'<circle cx="{x_pos(label):.2f}" cy="{y_pos(value):.2f}" r="4" fill="{color}"/>')
         legend_y = margin_top + idx * 24
         legend_x = width - margin_right + 40
         out.append(f'<rect x="{legend_x}" y="{legend_y - 10}" width="14" height="14" fill="{color}"/>')
@@ -249,6 +354,95 @@ def bar_plot(
         out.append(f'<rect x="{x:.2f}" y="{y:.2f}" width="{bar_w:.2f}" height="{margin_top + plot_h - y:.2f}" fill="{COLORS[idx % len(COLORS)]}"/>')
         out.append(f'<text x="{x + bar_w / 2:.2f}" y="{y - 8:.2f}" text-anchor="middle" font-family="sans-serif" font-size="12">{tick_text(value)}</text>')
         out.append(f'<text x="{x + bar_w / 2:.2f}" y="{margin_top + plot_h + 30}" text-anchor="middle" font-family="sans-serif" font-size="13">{escape(display_name(label))}</text>')
+
+    out.append("</svg>")
+    return "\n".join(out)
+
+
+def stacked_bar_plot(
+    title: str,
+    x_label: str,
+    y_label: str,
+    rows: list[dict[str, str]],
+    metric: str,
+    *,
+    width: int = 1280,
+    height: int = 720,
+) -> str:
+    margin_left = 110
+    margin_right = 420
+    margin_top = 70
+    margin_bottom = 105
+    plot_w = width - margin_left - margin_right
+    plot_h = height - margin_top - margin_bottom
+
+    variants = []
+    components = []
+    values: dict[tuple[str, str], float] = {}
+    for row in rows:
+        if row["component"] not in VIT_PRESENTATION_COMPONENTS:
+            continue
+        if row["variant"] not in VIT_BREAKDOWN_PLOT_VARIANTS:
+            continue
+        if row["variant"] not in variants:
+            variants.append(row["variant"])
+        if row["component"] not in components:
+            components.append(row["component"])
+        values[(row["variant"], row["component"])] = float(row[metric])
+
+    totals = {
+        variant: sum(values.get((variant, component), 0.0) for component in components)
+        for variant in VIT_BREAKDOWN_PLOT_VARIANTS
+        if variant in variants
+    }
+    variants = [variant for variant in VIT_BREAKDOWN_PLOT_VARIANTS if variant in variants]
+    y_max = 100.0 if metric == "share_pct" else nice_axis_max(max(totals.values(), default=1.0))
+    bar_w = min(120.0, plot_w / max(len(variants), 1) * 0.45)
+
+    def y_pos(value: float) -> float:
+        return margin_top + plot_h - (value / y_max) * plot_h
+
+    out = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="white"/>',
+        f'<text x="{margin_left}" y="38" font-family="sans-serif" font-size="24" font-weight="700">{escape(title)}</text>',
+        f'<text x="{margin_left + plot_w / 2}" y="{height - 24}" text-anchor="middle" font-family="sans-serif" font-size="16">{escape(x_label)}</text>',
+        f'<text x="24" y="{margin_top + plot_h / 2}" font-family="sans-serif" font-size="16" text-anchor="middle" transform="rotate(-90 24 {margin_top + plot_h / 2})">{escape(y_label)}</text>',
+        f'<line x1="{margin_left}" y1="{margin_top}" x2="{margin_left}" y2="{margin_top + plot_h}" stroke="#111827" stroke-width="1.5"/>',
+        f'<line x1="{margin_left}" y1="{margin_top + plot_h}" x2="{margin_left + plot_w}" y2="{margin_top + plot_h}" stroke="#111827" stroke-width="1.5"/>',
+    ]
+
+    for idx in range(5):
+        value = y_max * idx / 4
+        y = y_pos(value)
+        out.append(f'<line x1="{margin_left}" y1="{y:.2f}" x2="{margin_left + plot_w}" y2="{y:.2f}" stroke="#e5e7eb"/>')
+        out.append(f'<text x="{margin_left - 12}" y="{y + 5:.2f}" text-anchor="end" font-family="sans-serif" font-size="13">{tick_text(value)}</text>')
+
+    for variant_idx, variant in enumerate(variants):
+        slot = plot_w / max(len(variants), 1)
+        x = margin_left + variant_idx * slot + (slot - bar_w) / 2
+        cumulative = 0.0
+        for component_idx, component in enumerate(components):
+            value = values.get((variant, component), 0.0)
+            y1 = y_pos(cumulative)
+            y2 = y_pos(cumulative + value)
+            color = COLORS[component_idx % len(COLORS)]
+            out.append(
+                f'<rect x="{x:.2f}" y="{y2:.2f}" width="{bar_w:.2f}" '
+                f'height="{y1 - y2:.2f}" fill="{color}"/>'
+            )
+            cumulative += value
+        label_x = x + bar_w / 2
+        out.append(f'<text x="{label_x:.2f}" y="{margin_top + plot_h + 30}" text-anchor="middle" font-family="sans-serif" font-size="13">{escape(vit_breakdown_display_name(variant))}</text>')
+        if metric == "median_ms":
+            out.append(f'<text x="{label_x:.2f}" y="{y_pos(cumulative) - 8:.2f}" text-anchor="middle" font-family="sans-serif" font-size="12">{tick_text(cumulative)}</text>')
+
+    for idx, component in enumerate(components):
+        color = COLORS[idx % len(COLORS)]
+        legend_y = margin_top + idx * 24
+        legend_x = width - margin_right + 40
+        out.append(f'<rect x="{legend_x}" y="{legend_y - 10}" width="14" height="14" fill="{color}"/>')
+        out.append(f'<text x="{legend_x + 22}" y="{legend_y + 3}" font-family="sans-serif" font-size="14">{escape(component_name(component))}</text>')
 
     out.append("</svg>")
     return "\n".join(out)
@@ -323,13 +517,17 @@ def plot_attention_scaling(
     *,
     sweep: str | None,
 ) -> None:
-    rows = read_rows(path, ATTENTION_SCALING_HEADER)
+    rows = [
+        row
+        for row in read_rows(path, ATTENTION_SCALING_HEADER)
+        if row["name"] in ATTENTION_PLOT_VARIANTS
+    ]
     output.write_text(
         point_line_plot(
             chart_title("Attention", metric, sweep),
             x_axis_label(sweep),
             axis_label(metric),
-            scaling_series(rows, metric, sweep=sweep),
+            ordered_series(scaling_series(rows, metric, sweep=sweep), ATTENTION_PLOT_VARIANTS),
         )
     )
 
@@ -357,7 +555,7 @@ def plot_attention_memory(path: Path, output: Path) -> None:
     values = [
         (row["variant"], int(row["peak_allocated_bytes"]) / (1024 * 1024))
         for row in rows
-        if row["status"] == "ok"
+        if row["status"] == "ok" and row["variant"] in ATTENTION_PLOT_VARIANTS
     ]
     output.write_text(
         bar_plot(
@@ -373,14 +571,17 @@ def plot_attention_memory_scaling(path: Path, output: Path) -> None:
     rows = [
         row
         for row in read_rows(path, ATTENTION_MEMORY_SCALING_HEADER)
-        if row["status"] == "ok"
+        if row["status"] == "ok" and row["variant"] in ATTENTION_PLOT_VARIANTS
     ]
     output.write_text(
         point_line_plot(
             "Attention Peak Memory vs Sequence Length",
             x_axis_label("sequence"),
             axis_label("peak_allocated_mib"),
-            scaling_series(rows, "peak_allocated_mib", sweep="sequence"),
+            ordered_series(
+                scaling_series(rows, "peak_allocated_mib", sweep="sequence"),
+                ATTENTION_PLOT_VARIANTS,
+            ),
         )
     )
 
@@ -393,12 +594,17 @@ def extra_memory_series_vs_sdpa(rows: list[dict[str, str]]) -> dict[str, list[tu
     }
     series = defaultdict(list)
     for row in rows:
-        if row["status"] != "ok" or row["shape"] not in baselines:
+        if (
+            row["status"] != "ok"
+            or row["shape"] not in baselines
+            or row["variant"] not in ATTENTION_PLOT_VARIANTS
+            or row["variant"] == "pytorch_sdpa"
+        ):
             continue
         label = extract_sweep_label("sequence", row["shape"])
         extra_mib = (int(row["peak_allocated_bytes"]) - baselines[row["shape"]]) / (1024 * 1024)
         series[row["variant"]].append((label, extra_mib))
-    return dict(series)
+    return ordered_series(dict(series), ATTENTION_CUSTOM_PLOT_VARIANTS)
 
 
 def plot_attention_extra_memory_scaling(path: Path, output: Path) -> None:
@@ -439,6 +645,55 @@ def plot_vit_scaling(
     )
 
 
+def plot_vit_breakdown(path: Path, output: Path, *, metric: str) -> None:
+    rows = read_rows(path, VIT_BREAKDOWN_HEADER)
+    title = "Whole ViT Component Breakdown"
+    y_label = "Latency (ms)" if metric == "median_ms" else "Runtime Share (%)"
+    if metric == "share_pct":
+        title += " by Runtime Share"
+    output.write_text(
+        stacked_bar_plot(
+            title,
+            "Implementation",
+            y_label,
+            rows,
+            metric,
+        )
+    )
+
+
+def amdahl_series(rows: list[dict[str, str]], variant: str) -> dict[str, list[tuple[str, float]]]:
+    variant_rows = [
+        row
+        for row in rows
+        if row["variant"] == variant and row["component"] in VIT_AMDAHL_COMPONENTS
+    ]
+    series = {}
+    for local_speedup in AMDAHL_LOCAL_SPEEDUPS:
+        series[local_speedup_name(local_speedup)] = [
+            (
+                component_name(row["component"]),
+                amdahl_speedup_from_share(float(row["share_pct"]), local_speedup),
+            )
+            for row in variant_rows
+        ]
+    return series
+
+
+def plot_vit_amdahl(path: Path, output: Path, *, variant: str) -> None:
+    rows = read_rows(path, VIT_BREAKDOWN_HEADER)
+    output.write_text(
+        point_line_plot(
+            f"Amdahl Speedup Limits for {amdahl_display_name(variant)}",
+            "Optimized Component",
+            "Whole-ViT Speedup Limit (x)",
+            amdahl_series(rows, variant),
+            width=1500,
+            y_min=1.0,
+        )
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -450,6 +705,8 @@ def parse_args() -> argparse.Namespace:
             "attention-memory-scaling",
             "attention-extra-memory-scaling",
             "vit-scaling",
+            "vit-breakdown",
+            "vit-amdahl",
         ),
     )
     parser.add_argument("input", type=Path)
@@ -463,6 +720,7 @@ def parse_args() -> argparse.Namespace:
             "throughput_scale",
             "images_per_s",
             "tokens_per_s",
+            "share_pct",
         ),
         default="median_ms",
     )
@@ -491,6 +749,14 @@ def main() -> None:
         if args.sweep is None:
             raise ValueError("--sweep is required for vit-scaling")
         plot_vit_scaling(args.input, args.output, sweep=args.sweep)
+    elif args.kind == "vit-breakdown":
+        if args.metric not in {"median_ms", "share_pct"}:
+            raise ValueError("vit-breakdown supports --metric median_ms or share_pct")
+        plot_vit_breakdown(args.input, args.output, metric=args.metric)
+    elif args.kind == "vit-amdahl":
+        if args.sweep is None:
+            raise ValueError("--sweep must name the variant for vit-amdahl")
+        plot_vit_amdahl(args.input, args.output, variant=args.sweep)
     else:
         raise AssertionError(args.kind)
 

@@ -9,6 +9,8 @@ from benchmarks.reporting.plot import (
     plot_attention_memory_scaling,
     plot_attention_scaling,
     plot_patch_scaling,
+    plot_vit_breakdown,
+    plot_vit_amdahl,
     plot_vit_scaling,
 )
 
@@ -83,6 +85,7 @@ def generate_plots(
     attention_scaling: Path,
     attention_memory_scaling: Path | None,
     vit_scaling: Path | None,
+    vit_breakdown: Path | None,
     output_root: Path,
     *,
     include_speedup: bool,
@@ -132,6 +135,19 @@ def generate_plots(
             output = vit_dir / f"{sweep}_latency_with_pev1_3part.svg"
             plot_vit_scaling(vit_scaling, output, sweep=sweep, include_pev1_3part=True)
             outputs.append(output)
+    if vit_breakdown is not None and vit_breakdown.exists():
+        output = vit_dir / "component_breakdown_latency.svg"
+        plot_vit_breakdown(vit_breakdown, output, metric="median_ms")
+        outputs.append(output)
+        output = vit_dir / "component_breakdown_share.svg"
+        plot_vit_breakdown(vit_breakdown, output, metric="share_pct")
+        outputs.append(output)
+        output = vit_dir / "amdahl_custom_linear.svg"
+        plot_vit_amdahl(vit_breakdown, output, variant="custom_flash_own_linear")
+        outputs.append(output)
+        output = vit_dir / "amdahl_cublas_linear.svg"
+        plot_vit_amdahl(vit_breakdown, output, variant="custom_flash_cublas_linear")
+        outputs.append(output)
     return tuple(outputs)
 
 
@@ -157,6 +173,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("profiles/vit/scaling.csv"),
     )
+    parser.add_argument(
+        "--vit-breakdown",
+        type=Path,
+        default=Path("profiles/vit/breakdown.csv"),
+    )
     parser.add_argument("--output-root", type=Path, default=Path("reports"))
     parser.add_argument(
         "--include-speedup",
@@ -173,6 +194,7 @@ def main() -> None:
         args.attention_scaling,
         args.attention_memory_scaling,
         args.vit_scaling,
+        args.vit_breakdown,
         args.output_root,
         include_speedup=args.include_speedup,
     )
